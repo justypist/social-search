@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +50,7 @@ async def _stop_task_while_worker_process_is_starting(monkeypatch: Any, tmp_path
         return process
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
-    manager = TaskManager(_settings(tmp_path))
+    manager = _manager(tmp_path)
     await manager.start()
     try:
         created = await manager.create_task("https://example.test/video")
@@ -85,7 +86,7 @@ async def _worker_startup_failure_marks_task_failed(monkeypatch: Any, tmp_path: 
         raise OSError("spawn failed")
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
-    manager = TaskManager(_settings(tmp_path))
+    manager = _manager(tmp_path)
     await manager.start()
     try:
         created = await manager.create_task("https://example.test/video")
@@ -106,7 +107,7 @@ def test_create_task_uses_requested_language(tmp_path: Path) -> None:
 
 
 async def _create_task_uses_requested_language(tmp_path: Path) -> None:
-    manager = TaskManager(_settings(tmp_path))
+    manager = _manager(tmp_path)
 
     created = await manager.create_task("https://example.test/video", language="zh")
     task_id = created["id"]
@@ -121,7 +122,7 @@ def test_create_task_defaults_to_configured_language(tmp_path: Path) -> None:
 
 
 async def _create_task_defaults_to_configured_language(tmp_path: Path) -> None:
-    manager = TaskManager(_settings(tmp_path, language="en"))
+    manager = _manager(tmp_path, language="en")
 
     created = await manager.create_task("https://example.test/video")
     task_id = created["id"]
@@ -129,6 +130,95 @@ async def _create_task_defaults_to_configured_language(tmp_path: Path) -> None:
 
     assert created["language"] == "en"
     assert manager._job_payload(record)["language"] == "en"
+
+
+def test_completed_tasks_are_loaded_after_restart(tmp_path: Path) -> None:
+    asyncio.run(_completed_tasks_are_loaded_after_restart(tmp_path))
+
+
+async def _completed_tasks_are_loaded_after_restart(tmp_path: Path) -> None:
+    state_dir = tmp_path / "state"
+    manager = TaskManager(_settings(tmp_path), state_dir=state_dir)
+    created = await manager.create_task("https://example.test/video")
+    task_id = created["id"]
+    output_dir = tmp_path / "output" / "video"
+    output_dir.mkdir(parents=True)
+    (output_dir / "transcript.txt").write_text("hello\n", encoding="utf-8")
+
+    record = manager._tasks[task_id]
+    record.status = "succeeded"
+    record.stage = "done"
+    record.progress = 100
+    record.output_dir = str(output_dir)
+    record.files = manager._scan_files(task_id, output_dir)
+    manager._persist_tasks_locked()
+
+    restarted = TaskManager(_settings(tmp_path), state_dir=state_dir)
+    await restarted.start()
+    try:
+        tasks = await restarted.list_tasks()
+    finally:
+        await restarted.shutdown()
+
+    assert [task["id"] for task in tasks] == [task_id]
+    assert tasks[0]["status"] == "succeeded"
+    assert tasks[0]["files"][0]["name"] == "transcript.txt"
+
+
+def test_delete_task_removes_output_directory_and_persisted_record(tmp_path: Path) -> None:
+    asyncio.run(_delete_task_removes_output_directory_and_persisted_record(tmp_path))
+
+
+async def _delete_task_removes_output_directory_and_persisted_record(tmp_path: Path) -> None:
+    state_dir = tmp_path / "state"
+    manager = TaskManager(_settings(tmp_path), state_dir=state_dir)
+    created = await manager.create_task("https://example.test/video")
+    task_id = created["id"]
+    output_dir = tmp_path / "output" / "video"
+    output_dir.mkdir(parents=True)
+    (output_dir / "meta.json").write_text("{}", encoding="utf-8")
+
+    record = manager._tasks[task_id]
+    record.status = "succeeded"
+    record.output_dir = str(output_dir)
+    manager._persist_tasks_locked()
+
+    await manager.delete_task(task_id)
+
+    assert not output_dir.exists()
+    stored = json.loads((state_dir / "tasks.json").read_text(encoding="utf-8"))
+    assert stored["tasks"] == []
+
+
+def test_delete_failed_duplicate_download_removes_existing_output_directory(tmp_path: Path) -> None:
+    asyncio.run(_delete_failed_duplicate_download_removes_existing_output_directory(tmp_path))
+
+
+async def _delete_failed_duplicate_download_removes_existing_output_directory(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    created = await manager.create_task("https://example.test/video")
+    task_id = created["id"]
+    output_dir = tmp_path / "output" / "video"
+    output_dir.mkdir(parents=True)
+    (output_dir / "transcript.txt").write_text("old\n", encoding="utf-8")
+
+    await manager._handle_worker_line(
+        task_id,
+        json.dumps({"type": "error", "message": f"Output directory already exists: {output_dir}"}),
+    )
+    await manager._finish_task(task_id, 1)
+
+    failed = await manager.get_task(task_id)
+    assert failed["status"] == "failed"
+    assert failed["output_dir"] == str(output_dir.resolve())
+
+    await manager.delete_task(task_id)
+
+    assert not output_dir.exists()
+
+
+def _manager(tmp_path: Path, *, language: str = "auto") -> TaskManager:
+    return TaskManager(_settings(tmp_path, language=language), state_dir=tmp_path / "state")
 
 
 def _settings(tmp_path: Path, *, language: str = "auto") -> WebSettings:

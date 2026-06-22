@@ -1,0 +1,14 @@
+{
+  "name": "social-search",
+  "version": "1.0.0",
+  "description": "Social Search",
+  "type": "module",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^11.8.0",
+      "onFail": "download"
+    }
+  },
+  "scripts": {}
+}

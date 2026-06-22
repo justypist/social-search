@@ -1,0 +1,7 @@
+[project]
+name = "social-search"
+version = "0.1.0"
+description = "Social Search"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []

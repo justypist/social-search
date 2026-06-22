@@ -98,7 +98,10 @@ def test_downloaded_subtitle_is_used_before_audio(tmp_path: Path) -> None:
 
     assert result.source == "downloaded_subtitle"
     assert result.subtitle_path.read_text(encoding="utf-8").startswith("1\n00:00:00,000")
+    assert result.paragraph_subtitle_path.name == "subtitle.paragraph.srt"
+    assert result.paragraph_subtitle_path.read_text(encoding="utf-8").startswith("1\n00:00:00,000")
     assert result.transcript_text_path.read_text(encoding="utf-8") == "hello\n"
+    assert result.meta["files"]["paragraph_srt"] == "subtitle.paragraph.srt"
     assert not client.downloaded_audio
     assert transcriber.calls == []
 

@@ -8,6 +8,8 @@ from typing import Any
 
 from .models import Segment, Transcript
 
+PARAGRAPH_DURATION_SECONDS = 60.0
+
 _TIMESTAMP_RE = re.compile(
     r"(?P<start>\d{1,2}:\d{2}(?::\d{2})?[\.,]\d{1,3})\s+-->\s+"
     r"(?P<end>\d{1,2}:\d{2}(?::\d{2})?[\.,]\d{1,3})"
@@ -45,6 +47,58 @@ def write_srt(transcript: Transcript, path: Path) -> None:
         lines.append(segment.text)
         lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def write_paragraph_srt(
+    transcript: Transcript,
+    path: Path,
+    *,
+    max_duration_seconds: float = PARAGRAPH_DURATION_SECONDS,
+) -> None:
+    write_srt(aggregate_transcript(transcript, max_duration_seconds=max_duration_seconds), path)
+
+
+def aggregate_transcript(
+    transcript: Transcript,
+    *,
+    max_duration_seconds: float = PARAGRAPH_DURATION_SECONDS,
+) -> Transcript:
+    if max_duration_seconds <= 0:
+        raise ValueError("max_duration_seconds must be greater than 0")
+
+    paragraphs: list[Segment] = []
+    start: float | None = None
+    end: float | None = None
+    texts: list[str] = []
+
+    def flush() -> None:
+        nonlocal start, end, texts
+        if start is not None and end is not None and texts:
+            paragraphs.append(Segment(start=start, end=end, text=" ".join(texts)))
+        start = None
+        end = None
+        texts = []
+
+    for segment in transcript.segments:
+        text = segment.text.strip()
+        if not text:
+            continue
+
+        if start is not None and segment.start - start >= max_duration_seconds:
+            flush()
+
+        if start is None:
+            start = segment.start
+            end = segment.end
+        else:
+            end = max(end or segment.end, segment.end)
+        texts.append(text)
+
+        if end - start >= max_duration_seconds:
+            flush()
+
+    flush()
+    return Transcript(language=transcript.language, segments=paragraphs)
 
 
 def write_transcript_text(transcript: Transcript, path: Path) -> None:

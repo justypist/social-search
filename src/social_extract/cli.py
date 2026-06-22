@@ -81,6 +81,7 @@ def main(
     console.print(f"[green]Extracted subtitles[/green] via [bold]{result.source}[/bold]")
     console.print(f"Output: {result.output_dir}")
     console.print(f"SRT: {result.subtitle_path}")
+    console.print(f"Paragraph SRT: {result.paragraph_subtitle_path}")
     console.print(f"Text: {result.transcript_text_path}")
     console.print(f"Metadata: {result.meta_path}")
 

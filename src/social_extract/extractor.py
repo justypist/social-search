@@ -10,6 +10,7 @@ from .errors import ExtractionError
 from .formats import (
     subtitle_text_to_transcript,
     write_json,
+    write_paragraph_srt,
     write_srt,
     write_transcript_json,
     write_transcript_text,
@@ -81,12 +82,14 @@ class Extractor:
             transcript = self._transcribe_media(media_client, url, output_dir, config, state)
 
         subtitle_path = output_dir / "subtitle.srt"
+        paragraph_subtitle_path = output_dir / "subtitle.paragraph.srt"
         transcript_text_path = output_dir / "transcript.txt"
         transcript_json_path = output_dir / "transcript.json"
         meta_path = output_dir / "meta.json"
 
         self._emit_progress("write", "正在写入字幕和转写文件", 0.92)
         write_srt(transcript, subtitle_path)
+        write_paragraph_srt(transcript, paragraph_subtitle_path)
         write_transcript_text(transcript, transcript_text_path)
         write_transcript_json(transcript, transcript_json_path)
 
@@ -112,6 +115,7 @@ class Extractor:
             transcript=transcript,
             meta=meta,
             subtitle_path=subtitle_path,
+            paragraph_subtitle_path=paragraph_subtitle_path,
             transcript_text_path=transcript_text_path,
             transcript_json_path=transcript_json_path,
             meta_path=meta_path,
@@ -223,6 +227,7 @@ class Extractor:
             },
             "files": {
                 "subtitle_srt": "subtitle.srt",
+                "paragraph_srt": "subtitle.paragraph.srt",
                 "transcript_txt": "transcript.txt",
                 "transcript_json": "transcript.json",
                 "audio": relative_or_name(state.audio_path, output_dir),

@@ -87,6 +87,7 @@ out/
   <video-id-or-safe-title>/
     meta.json
     subtitle.srt
+    subtitle.paragraph.srt
     transcript.txt
     transcript.json
     audio.<fmt>     # 只有实际下载音频时保存
@@ -97,6 +98,7 @@ out/
 
 - `meta.json`：保存原始 URL、视频元信息、提取时间、使用路径、模型、产物路径等。
 - `subtitle.srt`：带时间轴的字幕主产物。
+- `subtitle.paragraph.srt`：按约一分钟聚合的段落版 SRT，适合直接阅读。
 - `transcript.txt`：纯文本，适合后续搜索索引。
 - `transcript.json`：结构化片段，包含每段的 `start`、`end` 和 `text`。
 

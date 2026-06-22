@@ -49,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
             "source": result.source,
             "output_dir": str(result.output_dir),
             "subtitle_path": str(result.subtitle_path),
+            "paragraph_subtitle_path": str(result.paragraph_subtitle_path),
             "transcript_text_path": str(result.transcript_text_path),
             "transcript_json_path": str(result.transcript_json_path),
             "meta_path": str(result.meta_path),

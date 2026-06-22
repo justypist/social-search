@@ -60,6 +60,7 @@ class ExtractionResult:
     transcript: Transcript
     meta: dict[str, Any]
     subtitle_path: Path
+    paragraph_subtitle_path: Path
     transcript_text_path: Path
     transcript_json_path: Path
     meta_path: Path

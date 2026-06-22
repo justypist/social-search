@@ -101,13 +101,43 @@ async def _worker_startup_failure_marks_task_failed(monkeypatch: Any, tmp_path: 
         await manager.shutdown()
 
 
-def _settings(tmp_path: Path) -> WebSettings:
+def test_create_task_uses_requested_language(tmp_path: Path) -> None:
+    asyncio.run(_create_task_uses_requested_language(tmp_path))
+
+
+async def _create_task_uses_requested_language(tmp_path: Path) -> None:
+    manager = TaskManager(_settings(tmp_path))
+
+    created = await manager.create_task("https://example.test/video", language="zh")
+    task_id = created["id"]
+    record = manager._tasks[task_id]
+
+    assert created["language"] == "zh"
+    assert manager._job_payload(record)["language"] == "zh"
+
+
+def test_create_task_defaults_to_configured_language(tmp_path: Path) -> None:
+    asyncio.run(_create_task_defaults_to_configured_language(tmp_path))
+
+
+async def _create_task_defaults_to_configured_language(tmp_path: Path) -> None:
+    manager = TaskManager(_settings(tmp_path, language="en"))
+
+    created = await manager.create_task("https://example.test/video")
+    task_id = created["id"]
+    record = manager._tasks[task_id]
+
+    assert created["language"] == "en"
+    assert manager._job_payload(record)["language"] == "en"
+
+
+def _settings(tmp_path: Path, *, language: str = "auto") -> WebSettings:
     return WebSettings(
         host="127.0.0.1",
         port=8000,
         concurrency=1,
         output_dir=tmp_path / "output",
-        language="auto",
+        language=language,  # type: ignore[arg-type]
         model="small",
         device="cpu",
         compute_type="int8",

@@ -2,8 +2,6 @@
 
 `social-extract` 是搜索前置工具：给定一个视频 URL，提取字幕、转写文本和元信息，供后续搜索索引使用。
 
-第一版只提供 CLI。
-
 ## 安装依赖
 
 ```bash
@@ -44,8 +42,6 @@ uv run social-extract "https://example.com/video" \
 - `--keep-media/--no-keep-media`：默认保留实际下载的音频或视频。
 - `--overwrite`：覆盖已存在的输出目录。
 - `--add-header "Name:Value"`：额外传给 `yt-dlp` 的 HTTP 请求头，可重复使用。
-
-Bilibili 当前会自动附加 `Referer` 和 `Origin` 请求头，用于避免部分视频在 `yt-dlp` 探测阶段返回 HTTP 412。
 
 ## Web 前端
 
@@ -104,9 +100,8 @@ out/
 - `transcript.txt`：纯文本，适合后续搜索索引。
 - `transcript.json`：结构化片段，包含每段的 `start`、`end` 和 `text`。
 
-## 开发验证
+## 测试链接
 
-```bash
-uv run pytest
-uv run social-extract --help
-```
+https://www.bilibili.com/video/BV1ueLJ61EkJ/?spm_id_from=333.337.search-card.all.click&vd_source=9ef09aa05456714cca397f9a8c5ffc62
+
+https://www.bilibili.com/video/BV1Ec6SBTE9S/?spm_id_from=333.337.search-card.all.click&vd_source=9ef09aa05456714cca397f9a8c5ffc62

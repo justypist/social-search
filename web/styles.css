@@ -276,6 +276,23 @@ h3 {
   gap: 8px;
 }
 
+.form-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+
+.field-control {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.field-control select {
+  width: 100%;
+}
+
 .form-error {
   min-height: 18px;
   color: var(--danger);

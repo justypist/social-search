@@ -37,6 +37,12 @@ const STAGE_LABELS = {
   stopping: "停止中",
 };
 
+const LANGUAGE_LABELS = {
+  auto: "自动检测",
+  zh: "中文",
+  en: "英文",
+};
+
 const state = {
   config: null,
   tasks: [],
@@ -55,6 +61,7 @@ const elements = {
   queueSummary: document.querySelector("#queueSummary"),
   taskForm: document.querySelector("#taskForm"),
   urlInput: document.querySelector("#urlInput"),
+  languageSelect: document.querySelector("#languageSelect"),
   submitButton: document.querySelector("#submitButton"),
   formError: document.querySelector("#formError"),
   queueMeta: document.querySelector("#queueMeta"),
@@ -104,6 +111,7 @@ async function loadConfig() {
   try {
     const payload = await api("/api/config");
     state.config = payload;
+    elements.languageSelect.value = payload.language || "auto";
     render();
   } catch (error) {
     state.error = error.message;
@@ -137,6 +145,7 @@ async function refreshTasks({ quiet }) {
 async function handleSubmit(event) {
   event.preventDefault();
   const url = elements.urlInput.value.trim();
+  const language = elements.languageSelect.value;
   elements.formError.textContent = "";
   if (!url) {
     elements.formError.textContent = "请输入视频链接";
@@ -149,7 +158,7 @@ async function handleSubmit(event) {
     const payload = await api("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, language }),
     });
     elements.urlInput.value = "";
     state.selectedId = payload.task.id;
@@ -243,7 +252,7 @@ function renderConfig() {
     elements.configStrip.textContent = state.error || "配置加载中";
     return;
   }
-  elements.configStrip.textContent = `并发 ${state.config.concurrency} | ${state.config.model} | ${state.config.device}`;
+  elements.configStrip.textContent = `并发 ${state.config.concurrency} | ${state.config.model} | ${state.config.device} | ${languageLabel(state.config.language)}`;
 }
 
 function renderSummary() {
@@ -265,6 +274,7 @@ function renderSummary() {
 function renderSubmitState() {
   elements.submitButton.disabled = state.isSubmitting;
   elements.urlInput.disabled = state.isSubmitting;
+  elements.languageSelect.disabled = state.isSubmitting;
   elements.submitButton.classList.toggle("is-loading", state.isSubmitting);
   elements.submitButton.textContent = state.isSubmitting ? "提交中" : "加入队列";
 }
@@ -323,6 +333,7 @@ function renderDetail() {
         <p class="progress-message">${escapeHtml(task.message || stageLabel(task.stage))}</p>
         <dl class="meta-grid">
           <div><dt>阶段</dt><dd>${escapeHtml(stageLabel(task.stage))}</dd></div>
+          <div><dt>语言</dt><dd>${escapeHtml(languageLabel(task.language))}</dd></div>
           <div><dt>来源</dt><dd>${escapeHtml(task.source || "-")}</dd></div>
           <div><dt>开始</dt><dd>${formatDate(task.started_at)}</dd></div>
           <div><dt>结束</dt><dd>${formatDate(task.finished_at)}</dd></div>
@@ -502,6 +513,10 @@ function formatSize(bytes) {
 
 function stageLabel(stage) {
   return STAGE_LABELS[stage] || stage || "-";
+}
+
+function languageLabel(language) {
+  return LANGUAGE_LABELS[language] || language || "-";
 }
 
 function escapeHtml(value) {

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
@@ -15,6 +15,7 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 class CreateTaskRequest(BaseModel):
     url: str = Field(min_length=1, max_length=4096)
+    language: Literal["auto", "zh", "en"] | None = None
 
 
 @router.get("")
@@ -27,7 +28,7 @@ async def create_task(
     request: CreateTaskRequest,
     manager: TaskManager = Depends(get_task_manager),
 ) -> dict[str, Any]:
-    return {"task": await manager.create_task(request.url)}
+    return {"task": await manager.create_task(request.url, language=request.language)}
 
 
 @router.get("/{task_id}")

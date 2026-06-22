@@ -10,6 +10,13 @@ from .models import Segment, TranscriptionResult, Transcript
 from .progress import StageProgressCallback
 
 
+AUTO_LANGUAGE_DETECTION_SEGMENTS = 5
+VAD_PARAMETERS = {
+    "min_speech_duration_ms": 500,
+    "min_silence_duration_ms": 500,
+}
+
+
 class Transcriber(Protocol):
     def transcribe(
         self,
@@ -85,12 +92,17 @@ class FasterWhisperTranscriber:
             progress_callback(None, "正在加载 Whisper 模型")
         model = WhisperModel(model_name, device=device, compute_type=compute_type)
         language_arg = None if language == "auto" else language
+        effective_vad_filter = vad_filter or language_arg is None
         if progress_callback is not None:
-            progress_callback(0.0, "正在分析音频")
+            message = "正在跳过非人声片段并检测语言" if language_arg is None else "正在分析音频"
+            progress_callback(0.0, message)
         raw_segments, info = model.transcribe(
             str(media_path),
             language=language_arg,
-            vad_filter=vad_filter,
+            vad_filter=effective_vad_filter,
+            vad_parameters=VAD_PARAMETERS if effective_vad_filter else None,
+            condition_on_previous_text=False,
+            language_detection_segments=AUTO_LANGUAGE_DETECTION_SEGMENTS if language_arg is None else 1,
         )
         duration = _audio_duration(info)
         segments: list[Segment] = []

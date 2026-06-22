@@ -14,6 +14,7 @@ from typing import Any, Literal
 from urllib.parse import quote, urlparse
 
 from fastapi import HTTPException
+from social_extract.models import Language
 from social_extract.progress import is_live_progress_message
 
 from .settings import WebSettings
@@ -34,6 +35,7 @@ class LogEntry:
 class TaskRecord:
     id: str
     url: str
+    language: Language
     status: TaskStatus
     progress: int
     stage: str
@@ -80,11 +82,12 @@ class TaskManager:
             worker.cancel()
         await asyncio.gather(*self._workers, return_exceptions=True)
 
-    async def create_task(self, url: str) -> dict[str, Any]:
+    async def create_task(self, url: str, *, language: Language | None = None) -> dict[str, Any]:
         parsed = urlparse(url.strip())
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise HTTPException(status_code=422, detail="请输入有效的视频链接")
 
+        task_language = language or self._settings.language
         now = _now()
         task_id = uuid.uuid4().hex
         async with self._lock:
@@ -92,6 +95,7 @@ class TaskManager:
             record = TaskRecord(
                 id=task_id,
                 url=url.strip(),
+                language=task_language,
                 status="queued",
                 progress=0,
                 stage="queued",
@@ -99,7 +103,7 @@ class TaskManager:
                 updated_at=now,
                 sequence=self._sequence,
             )
-            self._append_log(record, "info", "任务已加入队列")
+            self._append_log(record, "info", f"任务已加入队列 | 语言：{_language_label(record.language)}")
             self._tasks[task_id] = record
         await self._queue.put(task_id)
         return await self.get_task(task_id)
@@ -374,7 +378,7 @@ class TaskManager:
         return {
             "url": record.url,
             "output_root": str(self._settings.output_dir),
-            "language": self._settings.language,
+            "language": record.language,
             "model": self._settings.model,
             "device": self._settings.device,
             "compute_type": self._settings.compute_type,
@@ -413,6 +417,7 @@ class TaskManager:
         return {
             "id": record.id,
             "url": record.url,
+            "language": record.language,
             "status": record.status,
             "progress": record.progress,
             "stage": record.stage,
@@ -501,6 +506,14 @@ class TaskManager:
 
 def _now() -> str:
     return dt.datetime.now(dt.UTC).isoformat()
+
+
+def _language_label(language: str) -> str:
+    return {
+        "auto": "自动检测",
+        "zh": "中文",
+        "en": "英文",
+    }.get(language, language)
 
 
 def _progress_to_int(value: Any, fallback: int) -> int:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -40,6 +41,9 @@ class AudioExtractor(Protocol):
         ...
 
 
+ProgressCallback = Callable[[str, str, float | None], None]
+
+
 class Extractor:
     def __init__(
         self,
@@ -47,15 +51,19 @@ class Extractor:
         media_client: MediaClient | None = None,
         transcriber: Transcriber | None = None,
         audio_extractor: AudioExtractor | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         self._media_client = media_client
         self._transcriber = transcriber or FasterWhisperTranscriber()
         self._audio_extractor = audio_extractor or FfmpegAudioExtractor()
+        self._progress_callback = progress_callback
 
     def extract(self, url: str, config: ExtractConfig) -> ExtractionResult:
         started = time.monotonic()
         media_client = self._media_client or YtDlpClient(http_headers=config.http_headers)
+        self._emit_progress("probe", "正在读取视频信息", 0.05)
         info = media_client.probe(url)
+        self._emit_progress("prepare", "正在准备输出目录", 0.12)
         output_dir = prepare_output_dir(config.output_root, info, url, config.overwrite)
         state = ExtractionState()
 
@@ -68,11 +76,13 @@ class Extractor:
         transcript_json_path = output_dir / "transcript.json"
         meta_path = output_dir / "meta.json"
 
+        self._emit_progress("write", "正在写入字幕和转写文件", 0.92)
         write_srt(transcript, subtitle_path)
         write_transcript_text(transcript, transcript_text_path)
         write_transcript_json(transcript, transcript_json_path)
 
         if not config.keep_media:
+            self._emit_progress("cleanup", "正在清理媒体文件", 0.95)
             self._remove_media(state)
 
         meta = self._build_meta(
@@ -85,6 +95,7 @@ class Extractor:
             elapsed_seconds=time.monotonic() - started,
         )
         write_json(meta, meta_path)
+        self._emit_progress("done", "提取完成", 1.0)
 
         return ExtractionResult(
             output_dir=output_dir,
@@ -106,22 +117,28 @@ class Extractor:
         config: ExtractConfig,
         state: ExtractionState,
     ) -> Transcript | None:
+        self._emit_progress("subtitle", "正在查找可用字幕", 0.18)
         subtitle = select_subtitle(info, config.language)
         if subtitle is None:
+            self._emit_progress("subtitle", "未找到可用字幕，准备转写媒体", 0.24)
             return None
 
         try:
+            self._emit_progress("subtitle", "正在下载字幕", 0.3)
             text = media_client.download_subtitle_text(subtitle)
             transcript = subtitle_text_to_transcript(text, subtitle.ext, subtitle.language)
         except Exception as exc:
             state.notes.append(f"Downloaded subtitle could not be used: {exc}")
+            self._emit_progress("subtitle", "字幕不可用，准备转写媒体", 0.34)
             return None
 
         if not transcript.segments:
             state.notes.append("Downloaded subtitle contained no usable segments")
+            self._emit_progress("subtitle", "字幕为空，准备转写媒体", 0.34)
             return None
 
         state.source = "downloaded_subtitle"
+        self._emit_progress("subtitle", "已使用视频自带字幕", 0.84)
         return transcript
 
     def _transcribe_media(
@@ -133,14 +150,18 @@ class Extractor:
         state: ExtractionState,
     ) -> Transcript:
         try:
+            self._emit_progress("download_audio", "正在下载音频", 0.38)
             state.audio_path = media_client.download_audio(url, output_dir)
             state.source = "audio_transcribe"
         except ExtractionError as exc:
             state.notes.append(f"Audio download failed: {exc}")
+            self._emit_progress("download_video", "音频下载失败，正在下载视频", 0.48)
             state.video_path = media_client.download_video(url, output_dir)
+            self._emit_progress("extract_audio", "正在从视频提取音频", 0.58)
             state.audio_path = self._audio_extractor.extract(state.video_path, output_dir)
             state.source = "video_audio_transcribe"
 
+        self._emit_progress("transcribe", "正在本地转写音频", 0.68)
         state.whisper = self._transcriber.transcribe(
             state.audio_path,
             language=config.language,
@@ -149,6 +170,7 @@ class Extractor:
             compute_type=config.compute_type,
             vad_filter=config.vad_filter,
         )
+        self._emit_progress("transcribe", "转写完成", 0.88)
         return state.whisper.transcript
 
     def _build_meta(
@@ -208,3 +230,8 @@ class Extractor:
                 path.unlink()
         state.audio_path = None
         state.video_path = None
+
+    def _emit_progress(self, stage: str, message: str, progress: float | None = None) -> None:
+        if self._progress_callback is None:
+            return
+        self._progress_callback(stage, message, progress)

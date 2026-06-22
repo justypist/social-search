@@ -3,12 +3,16 @@
   "version": "1.0.0",
   "description": "Social Search",
   "type": "module",
+  "packageManager": "pnpm@11.8.0",
   "devEngines": {
     "packageManager": {
       "name": "pnpm",
-      "version": "^11.8.0",
+      "version": "11.8.0",
       "onFail": "download"
     }
   },
-  "scripts": {}
+  "scripts": {
+    "dev": "uv run social-web",
+    "api": "uv run social-web"
+  }
 }

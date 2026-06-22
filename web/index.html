@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Social Extract</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Social Search</p>
+          <h1>Social Extract</h1>
+        </div>
+        <div class="topbar-actions">
+          <div class="config-strip" id="configStrip">加载配置中</div>
+          <label class="theme-control">
+            <span>主题</span>
+            <select id="themeSelect" aria-label="主题">
+              <option value="system">跟随系统</option>
+              <option value="light">浅色</option>
+              <option value="dark">深色</option>
+            </select>
+          </label>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="submit-band" aria-labelledby="submitTitle">
+          <div>
+            <h2 id="submitTitle">新任务</h2>
+            <p class="muted" id="queueSummary">队列状态加载中</p>
+          </div>
+          <form id="taskForm" class="url-form">
+            <label for="urlInput">视频链接</label>
+            <div class="url-row">
+              <input id="urlInput" name="url" type="url" placeholder="https://..." autocomplete="off" required />
+              <button id="submitButton" type="submit">加入队列</button>
+            </div>
+            <p class="form-error" id="formError" role="alert"></p>
+          </form>
+        </section>
+
+        <section class="content-grid">
+          <aside class="queue-pane" aria-labelledby="queueTitle">
+            <div class="pane-heading">
+              <div>
+                <h2 id="queueTitle">任务队列</h2>
+                <p class="muted" id="queueMeta">0 个任务</p>
+              </div>
+              <button class="secondary small" id="refreshButton" type="button">刷新</button>
+            </div>
+            <div id="taskList" class="task-list" aria-live="polite"></div>
+          </aside>
+
+          <section class="detail-pane" aria-labelledby="detailTitle">
+            <div class="pane-heading">
+              <div>
+                <h2 id="detailTitle">任务详情</h2>
+                <p class="muted" id="detailMeta">未选择任务</p>
+              </div>
+              <div class="detail-actions" id="detailActions"></div>
+            </div>
+            <div id="taskDetail" class="task-detail"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

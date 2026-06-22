@@ -4,6 +4,7 @@
 
 ### Python-generated files
 __pycache__/
+.pytest_cache/
 *.py[oc]
 build/
 dist/
@@ -20,3 +21,8 @@ node_modules/
 ## app
 
 output/
+out/
+.env
+.social-search/
+.env*
+!.env.example

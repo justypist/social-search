@@ -47,6 +47,35 @@ uv run social-extract "https://example.com/video" \
 
 Bilibili 当前会自动附加 `Referer` 和 `Origin` 请求头，用于避免部分视频在 `yt-dlp` 探测阶段返回 HTTP 412。
 
+## Web 前端
+
+首次启动前会读取 `.env`；如果 `.env` 不存在，后端会从 `.env.example` 复制一份默认配置。
+
+安装前端依赖：
+
+```bash
+pnpm install
+```
+
+启动 Web 和 API：
+
+```bash
+pnpm dev
+```
+
+默认地址：
+
+- Web/API: `http://127.0.0.1:8000`
+
+常用环境变量在 `.env.example` 中，包含并发数、输出目录、Whisper 模型、设备、语言、是否保留媒体文件等配置。
+
+后端 API 位于 `src/api/`：
+
+- `src/api/main.py`：FastAPI 应用入口、生命周期和路由挂载。
+- `src/api/routers/`：HTTP 路由，后续新增 API 优先放这里。
+- `src/api/task_manager.py`：提取任务队列、子进程 worker 和文件下载管理。
+- `src/api/worker.py`：单个提取任务的子进程执行入口。
+
 ## 提取流程
 
 1. 用 `yt-dlp` 探测视频信息，优先下载已有字幕。

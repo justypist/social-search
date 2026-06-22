@@ -16,3 +16,7 @@ wheels/
 ## Nodejs
 
 node_modules/
+
+## app
+
+output/

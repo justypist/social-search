@@ -5,5 +5,25 @@ description = "Social Search"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "faster-whisper>=1.2.1",
+    "nvidia-cublas-cu12>=12.9.2.10",
+    "nvidia-cudnn-cu12>=9.23.2.1",
+    "rich>=15.0.0",
+    "typer>=0.25.1",
     "yt-dlp>=2026.6.9",
 ]
+
+[project.scripts]
+social-extract = "social_extract.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.0",
+]
+
+[build-system]
+requires = ["hatchling>=1.28.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/social_extract"]

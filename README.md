@@ -1,9 +1,83 @@
 # Social Search
 
-核心目的是下载视频中的字幕， 可用工具为 yt-dlp
+`social-extract` 是搜索前置工具：给定一个视频 URL，提取字幕、转写文本和元信息，供后续搜索索引使用。
 
-针对不同情况，有以下三种方式
+第一版只提供 CLI。
 
-1. 如果支持的话，直接下载字幕文件
-2. 下载音频流，转换为字幕文件（通过 whisper 或 云服务API， 暂时未定，留下接口）
-3. 下载视频流，通过 ffmpeg 提取其中的音频流，然后走上一步流程
+## 安装依赖
+
+```bash
+uv sync
+```
+
+本地转写使用 `faster-whisper`。项目依赖包含 NVIDIA CUDA 12/cuDNN 运行库 wheel；默认会优先尝试 CUDA GPU，如果不可用，会回退到 CPU。
+
+如果需要走“下载视频后提取音频”的兜底路径，系统里需要有 `ffmpeg`：
+
+```bash
+ffmpeg -version
+```
+
+## 使用
+
+```bash
+uv run social-extract "https://example.com/video" --lang auto --model medium --output ./out
+```
+
+常用参数：
+
+```bash
+uv run social-extract "https://example.com/video" \
+  --lang zh \
+  --model medium \
+  --device auto \
+  --output ./out
+```
+
+参数说明：
+
+- `--lang auto|zh|en`：默认自动识别，也可指定中文或英文。
+- `--model medium`：默认使用 `medium`，也可以传 `small`、`large-v3` 或本地/Hugging Face 模型名。
+- `--device auto|cuda|cpu`：默认自动选择。
+- `--compute-type auto|float16|int8_float16|int8`：默认自动选择。
+- `--vad-filter/--no-vad-filter`：默认关闭 VAD 预过滤；长音频连续讲话时关闭通常更快。
+- `--keep-media/--no-keep-media`：默认保留实际下载的音频或视频。
+- `--overwrite`：覆盖已存在的输出目录。
+- `--add-header "Name:Value"`：额外传给 `yt-dlp` 的 HTTP 请求头，可重复使用。
+
+Bilibili 当前会自动附加 `Referer` 和 `Origin` 请求头，用于避免部分视频在 `yt-dlp` 探测阶段返回 HTTP 412。
+
+## 提取流程
+
+1. 用 `yt-dlp` 探测视频信息，优先下载已有字幕。
+2. 如果没有可用字幕，下载最佳音频并用本地 Whisper 转写。
+3. 如果音频下载失败，下载视频，用 `ffmpeg` 提取音频，再走 Whisper 转写。
+
+## 输出
+
+默认输出到：
+
+```text
+out/
+  <video-id-or-safe-title>/
+    meta.json
+    subtitle.srt
+    transcript.txt
+    transcript.json
+    audio.<fmt>     # 只有实际下载音频时保存
+    video.<fmt>     # 只有实际下载视频时保存
+```
+
+文件说明：
+
+- `meta.json`：保存原始 URL、视频元信息、提取时间、使用路径、模型、产物路径等。
+- `subtitle.srt`：带时间轴的字幕主产物。
+- `transcript.txt`：纯文本，适合后续搜索索引。
+- `transcript.json`：结构化片段，包含每段的 `start`、`end` 和 `text`。
+
+## 开发验证
+
+```bash
+uv run pytest
+uv run social-extract --help
+```

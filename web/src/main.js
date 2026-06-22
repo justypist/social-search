@@ -89,8 +89,6 @@ function init() {
   elements.refreshButton.addEventListener("click", () => refreshTasks({ quiet: false }));
   elements.taskList.addEventListener("click", handleTaskListClick);
   elements.detailActions.addEventListener("click", handleActionClick);
-  elements.detailActions.addEventListener("mouseleave", handleDeleteReset, true);
-  elements.detailActions.addEventListener("focusout", handleDeleteReset, true);
 
   loadConfig();
   refreshTasks({ quiet: false });
@@ -211,13 +209,6 @@ async function handleActionClick(event) {
   } finally {
     state.actionTaskId = null;
     render();
-  }
-}
-
-function handleDeleteReset(event) {
-  const button = event.target.closest?.('[data-action="delete"]');
-  if (button) {
-    resetDeleteConfirm();
   }
 }
 

@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import os
 import re
+import signal
 import sys
 import uuid
 from dataclasses import dataclass, field
@@ -48,6 +49,7 @@ class TaskRecord:
     logs: list[LogEntry] = field(default_factory=list)
     files: list[dict[str, Any]] = field(default_factory=list)
     job_file: str | None = None
+    stop_requested: bool = False
     process: asyncio.subprocess.Process | None = field(default=None, repr=False)
 
 
@@ -142,13 +144,16 @@ class TaskManager:
                 record.updated_at = record.finished_at
                 self._append_log(record, "warning", "任务尚未开始，已取消")
                 return self._task_payload(record)
-            if record.status not in {"running", "stopping"} or record.process is None:
+            if record.status == "stopping":
+                return self._task_payload(record)
+            if record.status != "running":
                 raise HTTPException(status_code=409, detail="只有运行中的任务可以停止")
-            if record.status != "stopping":
-                record.status = "stopping"
-                record.stage = "stopping"
-                record.updated_at = _now()
-                self._append_log(record, "warning", "正在停止任务")
+            record.status = "stopping"
+            record.stage = "stopping"
+            record.stop_requested = True
+            record.updated_at = _now()
+            self._append_log(record, "warning", "正在停止任务")
+            if record.process is not None:
                 self._terminate_process(record.process)
                 asyncio.create_task(self._kill_later(record.id, record.process))
             return self._task_payload(record)
@@ -219,26 +224,40 @@ class TaskManager:
             record = self._tasks[task_id]
             job_payload = self._job_payload(record)
             record.job_file = str(job_path)
-        job_path.write_text(json.dumps(job_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-        process = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-m",
-            "api.worker",
-            str(job_path),
-            cwd=str(PROJECT_ROOT),
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
+        try:
+            job_path.write_text(json.dumps(job_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            process_options: dict[str, Any] = {
+                "cwd": str(PROJECT_ROOT),
+                "env": {**os.environ, "PYTHONUNBUFFERED": "1"},
+                "stdout": asyncio.subprocess.PIPE,
+                "stderr": asyncio.subprocess.STDOUT,
+            }
+            if os.name != "nt":
+                process_options["start_new_session"] = True
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-m",
+                "api.worker",
+                str(job_path),
+                **process_options,
+            )
+        except Exception as exc:
+            await self._finish_startup_failure(task_id, exc)
+            return
 
         async with self._lock:
             record = self._tasks.get(task_id)
             if record is None:
                 self._terminate_process(process)
+                asyncio.create_task(self._kill_later(task_id, process))
                 return
             record.process = process
             record.updated_at = _now()
+            should_stop = record.status == "stopping" or record.stop_requested
+
+        if should_stop:
+            self._terminate_process(process)
+            asyncio.create_task(self._kill_later(task_id, process))
 
         assert process.stdout is not None
         while True:
@@ -321,6 +340,26 @@ class TaskManager:
             record.error = record.error or f"worker exited with code {return_code}"
             self._append_log(record, "error", record.error)
 
+    async def _finish_startup_failure(self, task_id: str, exc: Exception) -> None:
+        async with self._lock:
+            record = self._tasks.get(task_id)
+            if record is None:
+                return
+            record.process = None
+            record.finished_at = _now()
+            record.updated_at = record.finished_at
+
+            if record.status == "stopping" or record.stop_requested:
+                record.status = "stopped"
+                record.stage = "stopped"
+                self._append_log(record, "warning", "任务已停止")
+                return
+
+            record.status = "failed"
+            record.stage = "failed"
+            record.error = f"worker 启动失败: {exc}"
+            self._append_log(record, "error", record.error)
+
     async def _kill_later(self, task_id: str, process: asyncio.subprocess.Process) -> None:
         await asyncio.sleep(5)
         if process.returncode is not None:
@@ -329,10 +368,7 @@ class TaskManager:
             record = self._tasks.get(task_id)
             if record is not None:
                 self._append_log(record, "warning", "停止超时，强制结束进程")
-        try:
-            process.kill()
-        except ProcessLookupError:
-            pass
+        self._kill_process(process)
 
     def _job_payload(self, record: TaskRecord) -> dict[str, Any]:
         return {
@@ -399,8 +435,35 @@ class TaskManager:
     def _terminate_process(process: asyncio.subprocess.Process) -> None:
         if process.returncode is not None:
             return
+        pid = getattr(process, "pid", None)
+        if os.name != "nt" and pid is not None:
+            try:
+                os.killpg(pid, signal.SIGTERM)
+                return
+            except ProcessLookupError:
+                return
+            except OSError:
+                pass
         try:
             process.terminate()
+        except ProcessLookupError:
+            pass
+
+    @staticmethod
+    def _kill_process(process: asyncio.subprocess.Process) -> None:
+        if process.returncode is not None:
+            return
+        pid = getattr(process, "pid", None)
+        if os.name != "nt" and pid is not None:
+            try:
+                os.killpg(pid, signal.SIGKILL)
+                return
+            except ProcessLookupError:
+                return
+            except OSError:
+                pass
+        try:
+            process.kill()
         except ProcessLookupError:
             pass
 

@@ -221,6 +221,8 @@ class TaskManager:
             "vad_filter": self._settings.vad_filter,
             "keep_media": self._settings.keep_media,
             "overwrite": self._settings.overwrite,
+            "cookie_files": bool(self._settings.cookie_files),
+            "cookies_from_browser": bool(self._settings.cookies_from_browser),
             "env_file": str(self._settings.env_file),
         }
 
@@ -417,6 +419,8 @@ class TaskManager:
             "keep_media": self._settings.keep_media,
             "overwrite": self._settings.overwrite,
             "http_headers": self._settings.http_headers,
+            "cookie_files": [str(path) for path in self._settings.cookie_files],
+            "cookies_from_browser": self._settings.cookies_from_browser,
         }
 
     def _append_log(self, record: TaskRecord, level: str, message: str) -> None:

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import os
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from social_extract.env import ensure_env_file, load_dotenv, parse_cookie_files, resolve_env_path
 from social_extract.models import Device, Language
 
 
@@ -23,6 +23,8 @@ ENV_DEFAULTS: dict[str, str] = {
     "SOCIAL_SEARCH_TASK_LOG_LIMIT": "500",
     "SOCIAL_SEARCH_ALLOWED_ORIGINS": "http://localhost:8000,http://127.0.0.1:8000",
     "SOCIAL_SEARCH_HTTP_HEADERS": "",
+    "SOCIAL_SEARCH_COOKIES": "",
+    "SOCIAL_SEARCH_COOKIES_FROM_BROWSER": "",
 }
 
 
@@ -42,14 +44,15 @@ class WebSettings:
     task_log_limit: int
     allowed_origins: list[str]
     http_headers: dict[str, str]
+    cookie_files: tuple[Path, ...]
+    cookies_from_browser: str | None
     env_file: Path
 
 
 def load_settings(env_file: Path | None = None) -> WebSettings:
-    env_path = env_file or Path(os.environ.get("SOCIAL_SEARCH_ENV_FILE", ".env"))
-    env_path = env_path.expanduser()
-    _ensure_env_file(env_path)
-    _load_dotenv(env_path)
+    env_path = resolve_env_path(env_file)
+    ensure_env_file(env_path)
+    load_dotenv(env_path)
 
     for key, value in ENV_DEFAULTS.items():
         os.environ.setdefault(key, value)
@@ -72,39 +75,10 @@ def load_settings(env_file: Path | None = None) -> WebSettings:
         task_log_limit=_int("SOCIAL_SEARCH_TASK_LOG_LIMIT", minimum=1),
         allowed_origins=_csv(os.environ["SOCIAL_SEARCH_ALLOWED_ORIGINS"]),
         http_headers=_headers(os.environ["SOCIAL_SEARCH_HTTP_HEADERS"]),
+        cookie_files=parse_cookie_files(os.environ["SOCIAL_SEARCH_COOKIES"]),
+        cookies_from_browser=_string_or_none(os.environ["SOCIAL_SEARCH_COOKIES_FROM_BROWSER"]),
         env_file=env_path.resolve(),
     )
-
-
-def _ensure_env_file(env_path: Path) -> None:
-    if env_path.exists():
-        return
-    example_path = env_path.with_name(".env.example")
-    if example_path.exists():
-        shutil.copyfile(example_path, env_path)
-
-
-def _load_dotenv(env_path: Path) -> None:
-    if not env_path.exists():
-        return
-
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        key, separator, value = line.partition("=")
-        if not separator:
-            continue
-        key = key.strip()
-        value = _strip_quotes(value.strip())
-        if key and key not in os.environ:
-            os.environ[key] = value
-
-
-def _strip_quotes(value: str) -> str:
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        return value[1:-1]
-    return value
 
 
 def _bool(key: str) -> bool:
@@ -155,3 +129,8 @@ def _headers(value: str) -> dict[str, str]:
             raise ValueError("SOCIAL_SEARCH_HTTP_HEADERS must use Name:Value pairs separated by semicolons")
         headers[name] = header_value
     return headers
+
+
+def _string_or_none(value: str) -> str | None:
+    text = value.strip()
+    return text or None

@@ -71,7 +71,19 @@ def _build_config(job: dict[str, Any]) -> ExtractConfig:
         keep_media=job["keep_media"],
         overwrite=job["overwrite"],
         http_headers=job["http_headers"],
+        cookie_files=_job_cookie_files(job),
+        cookies_from_browser=job.get("cookies_from_browser"),
     )
+
+
+def _job_cookie_files(job: dict[str, Any]) -> tuple[Path, ...]:
+    values = job.get("cookie_files")
+    if isinstance(values, list):
+        return tuple(Path(str(value)).expanduser() for value in values if str(value).strip())
+    cookie_file = job.get("cookie_file")
+    if cookie_file:
+        return (Path(str(cookie_file)).expanduser(),)
+    return ()
 
 
 def _emit(payload: dict[str, Any]) -> None:

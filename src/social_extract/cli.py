@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import nullcontext
 from enum import StrEnum
 from pathlib import Path
@@ -9,6 +10,7 @@ import typer
 from rich.console import Console
 
 from .core import extract_subtitles
+from .env import ensure_env_file, load_dotenv, parse_cookie_files, resolve_env_path
 from .errors import ExtractionError
 from .models import ExtractConfig
 from .progress import ProgressCallback
@@ -56,7 +58,9 @@ def main(
         typer.Option("--progress/--no-progress", help="Show live extraction progress."),
     ] = True,
 ) -> None:
-    headers = _parse_add_headers(add_header or [])
+    env_values = _load_env_values()
+    headers = env_values.http_headers
+    headers.update(_parse_add_headers(add_header or []))
     config = ExtractConfig(
         output_root=output,
         language=lang.value,
@@ -67,6 +71,8 @@ def main(
         keep_media=keep_media,
         overwrite=overwrite,
         http_headers=headers,
+        cookie_files=env_values.cookie_files,
+        cookies_from_browser=env_values.cookies_from_browser,
     )
 
     status_context = console.status("准备提取") if show_progress else nullcontext(None)
@@ -105,3 +111,39 @@ def _parse_add_headers(values: list[str]) -> dict[str, str]:
             raise typer.BadParameter("--add-header must use the form Name:Value")
         headers[name] = header_value
     return headers
+
+
+class _EnvValues:
+    def __init__(
+        self,
+        *,
+        http_headers: dict[str, str],
+        cookie_files: tuple[Path, ...],
+        cookies_from_browser: str | None,
+    ) -> None:
+        self.http_headers = http_headers
+        self.cookie_files = cookie_files
+        self.cookies_from_browser = cookies_from_browser
+
+
+def _load_env_values() -> _EnvValues:
+    env_path = resolve_env_path()
+    ensure_env_file(env_path)
+    load_dotenv(env_path)
+    return _EnvValues(
+        http_headers=_parse_env_headers(os.environ.get("SOCIAL_SEARCH_HTTP_HEADERS", "")),
+        cookie_files=parse_cookie_files(os.environ.get("SOCIAL_SEARCH_COOKIES", "")),
+        cookies_from_browser=_string_or_none(os.environ.get("SOCIAL_SEARCH_COOKIES_FROM_BROWSER", "")),
+    )
+
+
+def _parse_env_headers(value: str) -> dict[str, str]:
+    try:
+        return _parse_add_headers([item.strip() for item in value.split(";") if item.strip()])
+    except typer.BadParameter as exc:
+        raise typer.BadParameter("SOCIAL_SEARCH_HTTP_HEADERS must use Name:Value pairs separated by semicolons") from exc
+
+
+def _string_or_none(value: str) -> str | None:
+    text = value.strip()
+    return text or None

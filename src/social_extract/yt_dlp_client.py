@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import io
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 from urllib.parse import urlparse
 
 from yt_dlp import YoutubeDL
+from yt_dlp.cookies import SUPPORTED_BROWSERS, SUPPORTED_KEYRINGS
 from yt_dlp.utils import DownloadError
 
 from .errors import ExtractionError
@@ -15,8 +18,17 @@ from .progress import StageProgressCallback
 
 
 class YtDlpClient:
-    def __init__(self, http_headers: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        http_headers: dict[str, str] | None = None,
+        *,
+        cookie_file: Path | str | None = None,
+        cookie_files: tuple[Path | str, ...] | list[Path | str] | None = None,
+        cookies_from_browser: str | None = None,
+    ) -> None:
         self._http_headers = http_headers or {}
+        self._cookie_files = _coerce_cookie_files(cookie_file, cookie_files)
+        self._cookies_from_browser = cookies_from_browser
 
     def probe(self, url: str) -> dict[str, Any]:
         try:
@@ -117,10 +129,18 @@ class YtDlpClient:
             "noplaylist": True,
             "skip_download": skip_download,
         }
+        if skip_download:
+            options["ignore_no_formats_error"] = True
         headers = _default_headers_for_url(url)
         headers.update(self._http_headers)
         if headers:
             options["http_headers"] = headers
+        if len(self._cookie_files) == 1:
+            options["cookiefile"] = str(self._cookie_files[0])
+        elif len(self._cookie_files) > 1:
+            options["cookiefile"] = _merge_cookie_files(self._cookie_files)
+        if self._cookies_from_browser:
+            options["cookiesfrombrowser"] = _parse_cookies_from_browser(self._cookies_from_browser)
         return options
 
 
@@ -245,3 +265,71 @@ def _default_headers_for_url(url: str | None) -> dict[str, str]:
             "Origin": "https://www.bilibili.com",
         }
     return {}
+
+
+class _InMemoryCookieFile(io.StringIO):
+    def truncate(self, size: int | None = None) -> int:
+        result = super().truncate(size)
+        if size == 0:
+            self.seek(0)
+        return result
+
+
+def _coerce_cookie_files(
+    cookie_file: Path | str | None,
+    cookie_files: tuple[Path | str, ...] | list[Path | str] | None,
+) -> tuple[Path | str, ...]:
+    files: list[Path | str] = []
+    if cookie_file is not None:
+        files.append(cookie_file)
+    files.extend(cookie_files or ())
+    return tuple(dict.fromkeys(files))
+
+
+def _merge_cookie_files(cookie_files: tuple[Path | str, ...]) -> TextIO:
+    merged = _InMemoryCookieFile()
+    merged.write("# Netscape HTTP Cookie File\n\n")
+    for cookie_file in cookie_files:
+        try:
+            lines = Path(cookie_file).expanduser().read_text(encoding="utf-8").splitlines()
+        except OSError as exc:
+            raise ExtractionError(f"Could not read cookies file: {cookie_file}") from exc
+        for line in lines:
+            if line.startswith("# Netscape HTTP Cookie File"):
+                continue
+            if line.startswith("# This file is generated"):
+                continue
+            merged.write(f"{line}\n")
+        merged.write("\n")
+    merged.seek(0)
+    return merged
+
+
+def _parse_cookies_from_browser(value: str) -> tuple[str, str | None, str | None, str | None]:
+    browser_spec = value.strip()
+    match = re.fullmatch(
+        r"""
+        (?P<name>[^+:]+)
+        (?:\s*\+\s*(?P<keyring>[^:]+))?
+        (?:\s*:\s*(?!:)(?P<profile>.+?))?
+        (?:\s*::\s*(?P<container>.+))?
+        """,
+        browser_spec,
+        re.VERBOSE,
+    )
+    if match is None:
+        raise ExtractionError(f"Invalid cookies-from-browser value: {value}")
+
+    browser_name, keyring, profile, container = match.group("name", "keyring", "profile", "container")
+    browser_name = browser_name.lower()
+    if browser_name not in SUPPORTED_BROWSERS:
+        supported = ", ".join(sorted(SUPPORTED_BROWSERS))
+        raise ExtractionError(f'Unsupported cookies browser "{browser_name}". Supported browsers: {supported}')
+
+    if keyring is not None:
+        keyring = keyring.upper()
+        if keyring not in SUPPORTED_KEYRINGS:
+            supported_keyrings = ", ".join(sorted(SUPPORTED_KEYRINGS))
+            raise ExtractionError(f'Unsupported cookies keyring "{keyring}". Supported keyrings: {supported_keyrings}')
+
+    return browser_name, profile, keyring, container

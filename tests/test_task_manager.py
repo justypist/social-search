@@ -132,6 +132,24 @@ async def _create_task_defaults_to_configured_language(tmp_path: Path) -> None:
     assert manager._job_payload(record)["language"] == "en"
 
 
+def test_job_payload_includes_cookie_settings(tmp_path: Path) -> None:
+    youtube_cookie_file = tmp_path / "youtube-cookies.txt"
+    bilibili_cookie_file = tmp_path / "bilibili-cookies.txt"
+    manager = _manager(
+        tmp_path,
+        cookie_files=(youtube_cookie_file, bilibili_cookie_file),
+        cookies_from_browser="chrome:Default",
+    )
+    record = manager._tasks[
+        asyncio.run(manager.create_task("https://example.test/video"))["id"]
+    ]
+
+    payload = manager._job_payload(record)
+
+    assert payload["cookie_files"] == [str(youtube_cookie_file), str(bilibili_cookie_file)]
+    assert payload["cookies_from_browser"] == "chrome:Default"
+
+
 def test_completed_tasks_are_loaded_after_restart(tmp_path: Path) -> None:
     asyncio.run(_completed_tasks_are_loaded_after_restart(tmp_path))
 
@@ -217,11 +235,31 @@ async def _delete_failed_duplicate_download_removes_existing_output_directory(tm
     assert not output_dir.exists()
 
 
-def _manager(tmp_path: Path, *, language: str = "auto") -> TaskManager:
-    return TaskManager(_settings(tmp_path, language=language), state_dir=tmp_path / "state")
+def _manager(
+    tmp_path: Path,
+    *,
+    language: str = "auto",
+    cookie_files: tuple[Path, ...] = (),
+    cookies_from_browser: str | None = None,
+) -> TaskManager:
+    return TaskManager(
+        _settings(
+            tmp_path,
+            language=language,
+            cookie_files=cookie_files,
+            cookies_from_browser=cookies_from_browser,
+        ),
+        state_dir=tmp_path / "state",
+    )
 
 
-def _settings(tmp_path: Path, *, language: str = "auto") -> WebSettings:
+def _settings(
+    tmp_path: Path,
+    *,
+    language: str = "auto",
+    cookie_files: tuple[Path, ...] = (),
+    cookies_from_browser: str | None = None,
+) -> WebSettings:
     return WebSettings(
         host="127.0.0.1",
         port=8000,
@@ -237,5 +275,7 @@ def _settings(tmp_path: Path, *, language: str = "auto") -> WebSettings:
         task_log_limit=50,
         allowed_origins=[],
         http_headers={},
+        cookie_files=cookie_files,
+        cookies_from_browser=cookies_from_browser,
         env_file=tmp_path / ".env",
     )

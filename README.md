@@ -43,6 +43,17 @@ uv run social-extract "https://example.com/video" \
 - `--overwrite`：覆盖已存在的输出目录。
 - `--add-header "Name:Value"`：额外传给 `yt-dlp` 的 HTTP 请求头，可重复使用。
 
+CLI 和 Web 都会自动读取 `.env` 中的 `SOCIAL_SEARCH_HTTP_HEADERS`、`SOCIAL_SEARCH_COOKIES` 和
+`SOCIAL_SEARCH_COOKIES_FROM_BROWSER`。例如 YouTube 和 Bilibili 都需要登录 cookie 时，可配置：
+
+```bash
+SOCIAL_SEARCH_COOKIES=/absolute/path/to/youtube-cookies.txt;/absolute/path/to/bilibili-cookies.txt
+# 或者从本机浏览器读取，格式同 yt-dlp 的 --cookies-from-browser
+SOCIAL_SEARCH_COOKIES_FROM_BROWSER=chrome
+```
+
+`SOCIAL_SEARCH_COOKIES` 使用 Netscape cookies.txt 文件，多个文件用分号 `;` 分隔，程序会在运行时合并后传给 `yt-dlp`；`SOCIAL_SEARCH_COOKIES_FROM_BROWSER` 可写 `chrome`、`firefox:default`、`chrome:Default` 等 `yt-dlp` 支持的格式。
+
 ## Web 前端
 
 首次启动前会读取 `.env`；如果 `.env` 不存在，后端会从 `.env.example` 复制一份默认配置。
@@ -63,7 +74,7 @@ pnpm dev
 
 - Web/API: `http://127.0.0.1:8000`
 
-常用环境变量在 `.env.example` 中，包含并发数、输出目录、Whisper 模型、设备、语言、是否保留媒体文件等配置。
+常用环境变量在 `.env.example` 中，包含并发数、输出目录、Whisper 模型、设备、语言、是否保留媒体文件、`yt-dlp` headers 和 cookies 等配置。
 
 后端 API 位于 `src/api/`：
 

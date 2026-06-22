@@ -26,3 +26,4 @@ out/
 .social-search/
 .env*
 !.env.example
+cookies*.txt

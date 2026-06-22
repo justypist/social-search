@@ -42,6 +42,17 @@ class ExtractConfig:
     keep_media: bool = True
     overwrite: bool = False
     http_headers: dict[str, str] = field(default_factory=dict)
+    cookie_file: Path | None = None
+    cookie_files: tuple[Path, ...] = ()
+    cookies_from_browser: str | None = None
+
+    @property
+    def configured_cookie_files(self) -> tuple[Path, ...]:
+        if self.cookie_file is None:
+            return self.cookie_files
+        if self.cookie_file in self.cookie_files:
+            return self.cookie_files
+        return (self.cookie_file, *self.cookie_files)
 
 
 @dataclass(frozen=True)

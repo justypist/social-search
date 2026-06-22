@@ -70,7 +70,11 @@ class Extractor:
 
     def extract(self, url: str, config: ExtractConfig) -> ExtractionResult:
         started = time.monotonic()
-        media_client = self._media_client or YtDlpClient(http_headers=config.http_headers)
+        media_client = self._media_client or YtDlpClient(
+            http_headers=config.http_headers,
+            cookie_files=config.configured_cookie_files,
+            cookies_from_browser=config.cookies_from_browser,
+        )
         self._emit_progress("probe", "正在读取视频信息", 0.05)
         info = media_client.probe(url)
         self._emit_progress("prepare", "正在准备输出目录", 0.12)
@@ -216,6 +220,8 @@ class Extractor:
             "requested_language": config.language,
             "vad_filter": config.vad_filter,
             "request_headers": sorted(config.http_headers),
+            "cookie_file": bool(config.configured_cookie_files),
+            "cookies_from_browser": bool(config.cookies_from_browser),
             "video": {
                 "id": info.get("id"),
                 "title": info.get("title"),

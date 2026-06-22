@@ -13,6 +13,7 @@ from typing import Any, Literal
 from urllib.parse import quote, urlparse
 
 from fastapi import HTTPException
+from social_extract.progress import is_live_progress_message
 
 from .settings import WebSettings
 
@@ -275,7 +276,7 @@ class TaskManager:
                 record.progress = max(record.progress, progress)
                 record.updated_at = _now()
                 if message:
-                    if _is_live_progress_message(stage, message):
+                    if is_live_progress_message(stage, message):
                         self._append_progress_log(record, message)
                     else:
                         self._append_log(record, "info", message)
@@ -471,9 +472,3 @@ def _parse_ytdlp_download_progress(line: str) -> dict[str, float | str | None] |
         "speed": match.group("speed"),
         "eta": match.group("eta"),
     }
-
-
-def _is_live_progress_message(stage: str, message: str) -> bool:
-    if stage not in {"download_audio", "download_video", "transcribe"}:
-        return False
-    return message.startswith(("下载中", "转写中")) or message in {"下载完成"}

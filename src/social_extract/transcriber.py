@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
 from .cuda_runtime import preload_nvidia_cuda_libraries
 from .errors import ExtractionError
 from .models import Segment, TranscriptionResult, Transcript
-
-
-TranscriptionProgressCallback = Callable[[float | None, str], None]
+from .progress import StageProgressCallback
 
 
 class Transcriber(Protocol):
@@ -23,7 +20,7 @@ class Transcriber(Protocol):
         device: str,
         compute_type: str,
         vad_filter: bool,
-        progress_callback: TranscriptionProgressCallback | None = None,
+        progress_callback: StageProgressCallback | None = None,
     ) -> TranscriptionResult:
         ...
 
@@ -38,7 +35,7 @@ class FasterWhisperTranscriber:
         device: str,
         compute_type: str,
         vad_filter: bool,
-        progress_callback: TranscriptionProgressCallback | None = None,
+        progress_callback: StageProgressCallback | None = None,
     ) -> TranscriptionResult:
         if not media_path.exists():
             raise ExtractionError(f"Media file does not exist: {media_path}")
@@ -73,7 +70,7 @@ class FasterWhisperTranscriber:
         device: str,
         compute_type: str,
         vad_filter: bool,
-        progress_callback: TranscriptionProgressCallback | None = None,
+        progress_callback: StageProgressCallback | None = None,
     ) -> TranscriptionResult:
         try:
             from faster_whisper import WhisperModel

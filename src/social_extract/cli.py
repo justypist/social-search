@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
@@ -7,9 +8,10 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
+from .core import extract_subtitles
 from .errors import ExtractionError
-from .extractor import Extractor
 from .models import ExtractConfig
+from .progress import ProgressCallback
 
 
 class LanguageOption(StrEnum):
@@ -49,6 +51,10 @@ def main(
         list[str] | None,
         typer.Option("--add-header", help="Extra yt-dlp HTTP header as Name:Value. May be repeated."),
     ] = None,
+    show_progress: Annotated[
+        bool,
+        typer.Option("--progress/--no-progress", help="Show live extraction progress."),
+    ] = True,
 ) -> None:
     headers = _parse_add_headers(add_header or [])
     config = ExtractConfig(
@@ -63,17 +69,29 @@ def main(
         http_headers=headers,
     )
 
-    try:
-        result = Extractor().extract(url, config)
-    except ExtractionError as exc:
-        console.print(f"[red]Extraction failed:[/red] {exc}")
-        raise typer.Exit(1) from exc
+    status_context = console.status("准备提取") if show_progress else nullcontext(None)
+    with status_context as status:
+        progress_callback = _console_progress(status) if show_progress else None
+        try:
+            result = extract_subtitles(url, config, progress_callback=progress_callback)
+        except ExtractionError as exc:
+            console.print(f"[red]Extraction failed:[/red] {exc}")
+            raise typer.Exit(1) from exc
 
     console.print(f"[green]Extracted subtitles[/green] via [bold]{result.source}[/bold]")
     console.print(f"Output: {result.output_dir}")
     console.print(f"SRT: {result.subtitle_path}")
     console.print(f"Text: {result.transcript_text_path}")
     console.print(f"Metadata: {result.meta_path}")
+
+
+def _console_progress(status: object) -> ProgressCallback:
+    def progress(stage: str, message: str, progress_value: float | None) -> None:
+        del stage
+        suffix = "" if progress_value is None else f" {progress_value * 100:.0f}%"
+        status.update(f"{message}{suffix}")  # type: ignore[attr-defined]
+
+    return progress
 
 
 def _parse_add_headers(values: list[str]) -> dict[str, str]:

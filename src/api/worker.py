@@ -5,8 +5,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from social_extract.core import extract_subtitles
 from social_extract.errors import ExtractionError
-from social_extract.extractor import Extractor
 from social_extract.models import ExtractConfig
 
 
@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     try:
-        result = Extractor(progress_callback=progress).extract(job["url"], config)
+        result = extract_subtitles(job["url"], config, progress_callback=progress)
     except ExtractionError as exc:
         _emit({"type": "error", "message": str(exc)})
         return 1

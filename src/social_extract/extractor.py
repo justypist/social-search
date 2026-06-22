@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime as dt
 import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -17,9 +16,10 @@ from .formats import (
 )
 from .models import ExtractConfig, ExtractionResult, ExtractionState, SubtitleRef, Transcript
 from .paths import prepare_output_dir, relative_or_name
+from .progress import ProgressCallback, StageProgressCallback, stage_progress_callback
 from .subtitles import select_subtitle
 from .transcriber import FasterWhisperTranscriber, Transcriber
-from .yt_dlp_client import DownloadProgressCallback, YtDlpClient
+from .yt_dlp_client import YtDlpClient
 
 
 class MediaClient(Protocol):
@@ -34,7 +34,7 @@ class MediaClient(Protocol):
         url: str,
         output_dir: Path,
         *,
-        progress_callback: DownloadProgressCallback | None = None,
+        progress_callback: StageProgressCallback | None = None,
     ) -> Path:
         ...
 
@@ -43,7 +43,7 @@ class MediaClient(Protocol):
         url: str,
         output_dir: Path,
         *,
-        progress_callback: DownloadProgressCallback | None = None,
+        progress_callback: StageProgressCallback | None = None,
     ) -> Path:
         ...
 
@@ -51,9 +51,6 @@ class MediaClient(Protocol):
 class AudioExtractor(Protocol):
     def extract(self, video_path: Path, output_dir: Path) -> Path:
         ...
-
-
-ProgressCallback = Callable[[str, str, float | None], None]
 
 
 class Extractor:
@@ -257,9 +254,5 @@ class Extractor:
             return
         self._progress_callback(stage, message, progress)
 
-    def _stage_progress_callback(self, stage: str, start: float, end: float) -> DownloadProgressCallback:
-        def callback(percent: float | None, message: str) -> None:
-            progress = None if percent is None else start + (end - start) * percent / 100
-            self._emit_progress(stage, message, progress)
-
-        return callback
+    def _stage_progress_callback(self, stage: str, start: float, end: float) -> StageProgressCallback:
+        return stage_progress_callback(self._progress_callback, stage, start, end)

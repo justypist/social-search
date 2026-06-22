@@ -11,9 +11,7 @@ from yt_dlp.utils import DownloadError
 
 from .errors import ExtractionError
 from .models import SubtitleRef
-
-
-DownloadProgressCallback = Callable[[float | None, str], None]
+from .progress import StageProgressCallback
 
 
 class YtDlpClient:
@@ -53,7 +51,7 @@ class YtDlpClient:
         url: str,
         output_dir: Path,
         *,
-        progress_callback: DownloadProgressCallback | None = None,
+        progress_callback: StageProgressCallback | None = None,
     ) -> Path:
         return self._download_media(
             url,
@@ -68,7 +66,7 @@ class YtDlpClient:
         url: str,
         output_dir: Path,
         *,
-        progress_callback: DownloadProgressCallback | None = None,
+        progress_callback: StageProgressCallback | None = None,
     ) -> Path:
         return self._download_media(
             url,
@@ -85,7 +83,7 @@ class YtDlpClient:
         prefix: str,
         format_spec: str,
         *,
-        progress_callback: DownloadProgressCallback | None = None,
+        progress_callback: StageProgressCallback | None = None,
     ) -> Path:
         options = self._base_options(skip_download=False, url=url)
         options.update(
@@ -135,7 +133,7 @@ def _decode_text(payload: bytes) -> str:
     return payload.decode("utf-8", errors="replace")
 
 
-def _download_progress_hook(callback: DownloadProgressCallback) -> Callable[[dict[str, Any]], None]:
+def _download_progress_hook(callback: StageProgressCallback) -> Callable[[dict[str, Any]], None]:
     last_percent: float | None = None
     last_emit = 0.0
 

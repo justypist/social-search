@@ -22,15 +22,19 @@ class FakeMediaClient:
     def download_subtitle_text(self, subtitle: SubtitleRef) -> str:
         return subtitle.data or ""
 
-    def download_audio(self, url: str, output_dir: Path) -> Path:
+    def download_audio(self, url: str, output_dir: Path, *, progress_callback=None) -> Path:
         if self.audio_fails:
             raise ExtractionError("no audio")
+        if progress_callback is not None:
+            progress_callback(50.0, "下载中 50.0%")
         self.downloaded_audio = True
         path = output_dir / "audio.m4a"
         path.write_bytes(b"audio")
         return path
 
-    def download_video(self, url: str, output_dir: Path) -> Path:
+    def download_video(self, url: str, output_dir: Path, *, progress_callback=None) -> Path:
+        if progress_callback is not None:
+            progress_callback(50.0, "下载中 50.0%")
         self.downloaded_video = True
         path = output_dir / "video.mp4"
         path.write_bytes(b"video")
@@ -50,8 +54,11 @@ class FakeTranscriber:
         device: str,
         compute_type: str,
         vad_filter: bool,
+        progress_callback=None,
     ) -> TranscriptionResult:
         self.calls.append(media_path)
+        if progress_callback is not None:
+            progress_callback(25.0, "转写中 25.0%")
         return TranscriptionResult(
             transcript=Transcript(language="en", segments=[Segment(0.0, 1.0, "generated text")]),
             model=model_name,
@@ -109,6 +116,23 @@ def test_audio_fallback_transcribes_and_keeps_audio(tmp_path: Path) -> None:
     assert result.audio_path.name == "audio.m4a"
     assert transcriber.calls == [result.audio_path]
     assert result.meta["files"]["audio"] == "audio.m4a"
+
+
+def test_download_and_transcription_progress_is_forwarded(tmp_path: Path) -> None:
+    events: list[tuple[str, str, float | None]] = []
+    client = FakeMediaClient({"id": "progress", "title": "Progress"})
+    extractor = Extractor(
+        media_client=client,
+        transcriber=FakeTranscriber(),
+        progress_callback=lambda stage, message, progress: events.append((stage, message, progress)),
+    )
+
+    extractor.extract("https://example.test/video", ExtractConfig(output_root=tmp_path))
+
+    download_event = next(event for event in events if event[:2] == ("download_audio", "下载中 50.0%"))
+    transcribe_event = next(event for event in events if event[:2] == ("transcribe", "转写中 25.0%"))
+    assert download_event[2] == pytest.approx(0.51)
+    assert transcribe_event[2] == pytest.approx(0.73)
 
 
 def test_video_fallback_when_audio_download_fails(tmp_path: Path) -> None:

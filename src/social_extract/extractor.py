@@ -19,7 +19,7 @@ from .models import ExtractConfig, ExtractionResult, ExtractionState, SubtitleRe
 from .paths import prepare_output_dir, relative_or_name
 from .subtitles import select_subtitle
 from .transcriber import FasterWhisperTranscriber, Transcriber
-from .yt_dlp_client import YtDlpClient
+from .yt_dlp_client import DownloadProgressCallback, YtDlpClient
 
 
 class MediaClient(Protocol):
@@ -29,10 +29,22 @@ class MediaClient(Protocol):
     def download_subtitle_text(self, subtitle: SubtitleRef) -> str:
         ...
 
-    def download_audio(self, url: str, output_dir: Path) -> Path:
+    def download_audio(
+        self,
+        url: str,
+        output_dir: Path,
+        *,
+        progress_callback: DownloadProgressCallback | None = None,
+    ) -> Path:
         ...
 
-    def download_video(self, url: str, output_dir: Path) -> Path:
+    def download_video(
+        self,
+        url: str,
+        output_dir: Path,
+        *,
+        progress_callback: DownloadProgressCallback | None = None,
+    ) -> Path:
         ...
 
 
@@ -151,12 +163,20 @@ class Extractor:
     ) -> Transcript:
         try:
             self._emit_progress("download_audio", "正在下载音频", 0.38)
-            state.audio_path = media_client.download_audio(url, output_dir)
+            state.audio_path = media_client.download_audio(
+                url,
+                output_dir,
+                progress_callback=self._stage_progress_callback("download_audio", 0.38, 0.64),
+            )
             state.source = "audio_transcribe"
         except ExtractionError as exc:
             state.notes.append(f"Audio download failed: {exc}")
             self._emit_progress("download_video", "音频下载失败，正在下载视频", 0.48)
-            state.video_path = media_client.download_video(url, output_dir)
+            state.video_path = media_client.download_video(
+                url,
+                output_dir,
+                progress_callback=self._stage_progress_callback("download_video", 0.48, 0.58),
+            )
             self._emit_progress("extract_audio", "正在从视频提取音频", 0.58)
             state.audio_path = self._audio_extractor.extract(state.video_path, output_dir)
             state.source = "video_audio_transcribe"
@@ -169,6 +189,7 @@ class Extractor:
             device=config.device,
             compute_type=config.compute_type,
             vad_filter=config.vad_filter,
+            progress_callback=self._stage_progress_callback("transcribe", 0.68, 0.88),
         )
         self._emit_progress("transcribe", "转写完成", 0.88)
         return state.whisper.transcript
@@ -235,3 +256,10 @@ class Extractor:
         if self._progress_callback is None:
             return
         self._progress_callback(stage, message, progress)
+
+    def _stage_progress_callback(self, stage: str, start: float, end: float) -> DownloadProgressCallback:
+        def callback(percent: float | None, message: str) -> None:
+            progress = None if percent is None else start + (end - start) * percent / 100
+            self._emit_progress(stage, message, progress)
+
+        return callback

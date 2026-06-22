@@ -272,7 +272,7 @@ h3 {
 
 .content-grid {
   display: grid;
-  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: 0;
   min-height: 640px;
   border-bottom: 1px solid var(--border);
@@ -345,7 +345,7 @@ h3 {
 
 .task-list {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   max-height: calc(100vh - 280px);
   min-height: 240px;
   overflow-x: hidden;
@@ -356,10 +356,9 @@ h3 {
 
 .task-item {
   display: grid;
-  gap: 10px;
   width: 100%;
-  min-height: 104px;
-  padding: 12px;
+  min-height: 48px;
+  padding: 9px 10px;
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--fg);
@@ -389,7 +388,7 @@ h3 {
   min-width: 0;
   overflow: hidden;
   color: var(--fg);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 550;
   line-height: 1.35;
   text-overflow: ellipsis;

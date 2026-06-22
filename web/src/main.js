@@ -300,13 +300,6 @@ function renderTaskItem(task) {
         <span class="task-url" title="${escapeHtml(task.url)}">${escapeHtml(task.url)}</span>
         <span class="status-pill tone-${tone}">${STATUS_LABELS[task.status] || task.status}</span>
       </span>
-      <span class="progress-track" aria-label="进度 ${task.progress}%">
-        <span class="progress-fill" style="width: ${task.progress}%"></span>
-      </span>
-      <span class="task-foot">
-        <span>${escapeHtml(stageLabel(task.stage))}</span>
-        <span>${task.progress}%</span>
-      </span>
     </button>
   `;
 }

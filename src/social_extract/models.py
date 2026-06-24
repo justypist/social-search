@@ -46,6 +46,7 @@ class ExtractConfig:
     cookie_files: tuple[Path, ...] = ()
     cookies_from_browser: str | None = None
     extract_visual: bool = False
+    describe_visual: bool = False
     frame_fps: float = 1.0
     has_text_variance_min: float = 20.0
     has_text_skin_ratio_max: float = 0.15
@@ -59,6 +60,10 @@ class ExtractConfig:
     visual_text_min_chars: int = 10
     text_dedup_jaccard_threshold: float = 0.9
     text_dedup_containment_threshold: float = 0.85
+    visual_description_optional: bool = True
+    max_visual_describe_pages: int = 120
+    visual_description_provider: str | None = None
+    visual_description_model: str | None = None
 
     @property
     def configured_cookie_files(self) -> tuple[Path, ...]:
@@ -102,5 +107,6 @@ class ExtractionState:
     video_path: Path | None = None
     pages_json_path: Path | None = None
     frames_dir: Path | None = None
+    visual_description: dict[str, Any] | None = None
     whisper: TranscriptionResult | None = None
     notes: list[str] = field(default_factory=list)

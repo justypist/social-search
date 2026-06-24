@@ -131,8 +131,10 @@ async def _create_task_defaults_to_configured_language(tmp_path: Path) -> None:
 
     assert created["language"] == "en"
     assert created["extract_visual"] is False
+    assert created["describe_visual"] is False
     assert manager._job_payload(record)["language"] == "en"
     assert manager._job_payload(record)["extract_visual"] is False
+    assert manager._job_payload(record)["describe_visual"] is False
 
 
 def test_create_task_persists_extract_visual_choice(tmp_path: Path) -> None:
@@ -155,10 +157,35 @@ async def _create_task_persists_extract_visual_choice(tmp_path: Path) -> None:
     assert stored["tasks"][0]["extract_visual"] is True
 
 
+def test_create_task_persists_describe_visual_choice_and_enables_visual(tmp_path: Path) -> None:
+    asyncio.run(_create_task_persists_describe_visual_choice_and_enables_visual(tmp_path))
+
+
+async def _create_task_persists_describe_visual_choice_and_enables_visual(tmp_path: Path) -> None:
+    state_dir = tmp_path / "state"
+    manager = TaskManager(_settings(tmp_path), state_dir=state_dir)
+
+    created = await manager.create_task("https://example.test/video", describe_visual=True)
+    task_id = created["id"]
+    record = manager._tasks[task_id]
+    payload = manager._job_payload(record)
+    stored = json.loads((state_dir / "tasks.json").read_text(encoding="utf-8"))
+
+    assert created["extract_visual"] is True
+    assert created["describe_visual"] is True
+    assert record.extract_visual is True
+    assert record.describe_visual is True
+    assert payload["extract_visual"] is True
+    assert payload["describe_visual"] is True
+    assert stored["tasks"][0]["extract_visual"] is True
+    assert stored["tasks"][0]["describe_visual"] is True
+
+
 def test_create_task_request_defaults_extract_visual_false() -> None:
     request = CreateTaskRequest(url="https://example.test/video")
 
     assert request.extract_visual is False
+    assert request.describe_visual is False
 
 
 def test_visual_progress_logs_replace_previous_progress_message(tmp_path: Path) -> None:

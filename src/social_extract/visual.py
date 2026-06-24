@@ -4,12 +4,14 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from .errors import ExtractionError
 from .formats import write_json
 from .frames import FfmpegFrameExtractor, FrameExtractionResult, FrameExtractor, FrameRef
 from .models import ExtractConfig
 from .ocr import OcrRecognizer, RapidOcrRecognizer
 from .paths import relative_or_name
 from .progress import ProgressCallback
+from .visual_description import GeminiVisualDescriber, VisualDescriber
 from .vision import (
     HasTextDetector,
     OpenCvHasTextDetector,
@@ -52,12 +54,14 @@ class VisualExtractor:
         has_text_detector: HasTextDetector | None = None,
         page_change_detector: PageChangeDetector | None = None,
         text_dedup: TextDedup | None = None,
+        visual_describer: VisualDescriber | None = None,
     ) -> None:
         self._frame_extractor = frame_extractor or FfmpegFrameExtractor()
         self._ocr_recognizer = ocr_recognizer or RapidOcrRecognizer()
         self._has_text_detector = has_text_detector or OpenCvHasTextDetector()
         self._page_change_detector = page_change_detector or SsimPageChangeDetector()
         self._text_dedup = text_dedup or TextDedup()
+        self._visual_describer = visual_describer
 
     def extract(
         self,
@@ -75,14 +79,44 @@ class VisualExtractor:
         text_flags = self._detect_text_frames(frame_result.frames, config, progress_callback)
         text_flags = _apply_min_consecutive_text_frames(text_flags, config.has_text_min_consecutive_frames)
         non_text_segments = _non_text_segments(frame_result.frames, text_flags, frame_result.fps)
-        candidates = self._select_representative_frames(frame_result.frames, text_flags, frame_result.fps, config)
+        _emit(progress_callback, "visual_select", "选择代表帧 0.0%", 0.84)
+        candidates = self._select_representative_frames(
+            frame_result.frames,
+            text_flags,
+            frame_result.fps,
+            config,
+            progress_callback,
+        )
 
         _emit(progress_callback, "visual_ocr", "识别画面文字 0.0%", 0.86)
-        pages = self._recognize_pages(candidates, config, progress_callback)
+        pages = self._recognize_pages(candidates, config, progress_callback, self._ocr_recognizer)
         pages = self._deduplicate_pages(pages, config)
 
-        _emit(progress_callback, "visual_write", "写入画面文字", 0.9)
         payload_pages = self._materialize_page_frames(pages, frame_result.frames_dir, output_dir)
+        visual_description_meta = None
+        if config.describe_visual:
+            provider = (config.visual_description_provider or "gemini").strip().lower()
+            if provider != "gemini":
+                raise ExtractionError(f'Unsupported visual description provider "{provider}"')
+            _emit(progress_callback, "visual_describe", "总结关键帧 0.0%", 0.89)
+            describer = self._visual_describer or GeminiVisualDescriber(
+                cookie_files=config.configured_cookie_files or None,
+                model=config.visual_description_model,
+            )
+            try:
+                description_result = describer.describe_pages(
+                    payload_pages,
+                    output_dir,
+                    config,
+                    progress_callback=progress_callback,
+                )
+            finally:
+                if self._visual_describer is None:
+                    _close_describer(describer)
+            payload_pages = description_result.pages
+            visual_description_meta = description_result.meta
+
+        _emit(progress_callback, "visual_write", "写入画面文字", 0.93 if config.describe_visual else 0.9)
         payload = {
             "frame_fps": frame_result.fps,
             "pages": payload_pages,
@@ -94,6 +128,8 @@ class VisualExtractor:
                 "pages": len(payload_pages),
             },
         }
+        if visual_description_meta is not None:
+            payload["visual_description"] = visual_description_meta
         pages_json_path = output_dir / "pages.json"
         write_json(payload, pages_json_path)
         return VisualExtractionResult(
@@ -127,13 +163,23 @@ class VisualExtractor:
         text_flags: list[bool],
         fps: float,
         config: ExtractConfig,
+        progress_callback: ProgressCallback | None,
     ) -> list[_PageCandidate]:
         candidates: list[_PageCandidate] = []
         duration = _frame_duration(fps)
-        for start, end in _true_runs(text_flags):
+        runs = _true_runs(text_flags)
+        total_text_frames = sum(end - start for start, end in runs)
+        if total_text_frames == 0:
+            _emit(progress_callback, "visual_select", "选择代表帧 100.0%", 0.86)
+            return candidates
+
+        processed_before = 0
+        for start, end in runs:
             run = frames[start:end]
             if not run:
                 continue
+            run_len = len(run)
+            _emit_select_progress(progress_callback, processed_before + 1, total_text_frames)
             run_candidates: list[int] = [0]
             index = 1
             while index < len(run):
@@ -142,8 +188,14 @@ class VisualExtractor:
                     if stable_index != run_candidates[-1]:
                         run_candidates.append(stable_index)
                     index = max(index + 1, stable_index + 1)
+                    _emit_select_progress(
+                        progress_callback,
+                        processed_before + min(index, run_len),
+                        total_text_frames,
+                    )
                     continue
                 index += 1
+                _emit_select_progress(progress_callback, processed_before + index, total_text_frames)
             for candidate_index, run_index in enumerate(run_candidates):
                 next_index = run_candidates[candidate_index + 1] if candidate_index + 1 < len(run_candidates) else None
                 page_start = run[0].timestamp if candidate_index == 0 else run[run_index].timestamp
@@ -155,6 +207,8 @@ class VisualExtractor:
                         frame=run[run_index],
                     )
                 )
+            processed_before += run_len
+            _emit_select_progress(progress_callback, processed_before, total_text_frames, force=True)
         return candidates
 
     def _find_stable_index(self, run: list[FrameRef], start_index: int, config: ExtractConfig) -> int:
@@ -179,6 +233,7 @@ class VisualExtractor:
         candidates: list[_PageCandidate],
         config: ExtractConfig,
         progress_callback: ProgressCallback | None,
+        ocr_recognizer: OcrRecognizer,
     ) -> list[_RecognizedPage]:
         pages: list[_RecognizedPage] = []
         total = len(candidates)
@@ -186,7 +241,7 @@ class VisualExtractor:
             _emit(progress_callback, "visual_ocr", "识别画面文字 100.0%", 0.89)
             return pages
         for index, candidate in enumerate(candidates):
-            ocr_result = self._ocr_recognizer.recognize(candidate.frame.path)
+            ocr_result = ocr_recognizer.recognize(candidate.frame.path)
             text = ocr_result.text.strip()
             if len(normalize_text(text)) >= config.visual_text_min_chars:
                 pages.append(
@@ -308,3 +363,26 @@ def _emit(
 ) -> None:
     if progress_callback is not None:
         progress_callback(stage, message, progress)
+
+
+def _emit_select_progress(
+    progress_callback: ProgressCallback | None,
+    processed: int,
+    total: int,
+    *,
+    force: bool = False,
+) -> None:
+    if total <= 0:
+        return
+    processed = max(0, min(total, processed))
+    if not force and processed < total and processed % 10 != 0:
+        return
+    percent = processed / total * 100
+    progress = 0.84 + 0.02 * processed / total
+    _emit(progress_callback, "visual_select", f"选择代表帧 {percent:.1f}%", progress)
+
+
+def _close_describer(describer: VisualDescriber) -> None:
+    close = getattr(describer, "close", None)
+    if callable(close):
+        close()

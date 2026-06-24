@@ -41,6 +41,7 @@ class TaskRecord:
     url: str
     language: Language
     extract_visual: bool
+    describe_visual: bool
     status: TaskStatus
     progress: int
     stage: str
@@ -102,12 +103,14 @@ class TaskManager:
         *,
         language: Language | None = None,
         extract_visual: bool = False,
+        describe_visual: bool = False,
     ) -> dict[str, Any]:
         parsed = urlparse(url.strip())
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise HTTPException(status_code=422, detail="请输入有效的视频链接")
 
         task_language = language or self._settings.language
+        task_extract_visual = extract_visual or describe_visual
         now = _now()
         task_id = uuid.uuid4().hex
         async with self._lock:
@@ -116,7 +119,8 @@ class TaskManager:
                 id=task_id,
                 url=url.strip(),
                 language=task_language,
-                extract_visual=extract_visual,
+                extract_visual=task_extract_visual,
+                describe_visual=describe_visual,
                 status="queued",
                 progress=0,
                 stage="queued",
@@ -124,7 +128,12 @@ class TaskManager:
                 updated_at=now,
                 sequence=self._sequence,
             )
-            visual_label = " | 画面文字：开启" if record.extract_visual else ""
+            visual_labels = []
+            if record.extract_visual:
+                visual_labels.append("画面文字：开启")
+            if record.describe_visual:
+                visual_labels.append("关键帧总结：开启")
+            visual_label = f" | {' | '.join(visual_labels)}" if visual_labels else ""
             self._append_log(record, "info", f"任务已加入队列 | 语言：{_language_label(record.language)}{visual_label}")
             self._tasks[task_id] = record
             self._persist_tasks_locked()
@@ -422,6 +431,7 @@ class TaskManager:
             "output_root": str(self._settings.output_dir),
             "language": record.language,
             "extract_visual": record.extract_visual,
+            "describe_visual": record.describe_visual,
             "model": self._settings.model,
             "device": self._settings.device,
             "compute_type": self._settings.compute_type,
@@ -466,6 +476,7 @@ class TaskManager:
             "url": record.url,
             "language": record.language,
             "extract_visual": record.extract_visual,
+            "describe_visual": record.describe_visual,
             "status": record.status,
             "progress": record.progress,
             "stage": record.stage,
@@ -539,11 +550,14 @@ class TaskManager:
             logs.append(LogEntry(at=at, level=level, message=message))
 
         sequence = _coerce_int(payload.get("sequence"), self._sequence + 1)
+        describe_visual = _coerce_bool(payload.get("describe_visual"), False)
+        extract_visual = _coerce_bool(payload.get("extract_visual"), False) or describe_visual
         return TaskRecord(
             id=task_id,
             url=url,
             language=_coerce_language(payload.get("language"), self._settings.language),
-            extract_visual=_coerce_bool(payload.get("extract_visual"), False),
+            extract_visual=extract_visual,
+            describe_visual=describe_visual,
             status=status,  # type: ignore[arg-type]
             progress=max(0, min(100, _coerce_int(payload.get("progress"), 0))),
             stage=_clean_string(payload.get("stage")) or status,
@@ -587,11 +601,14 @@ class TaskManager:
             now = _now()
             created_at = _clean_string(meta.get("extracted_at")) or now
             self._sequence += 1
+            describe_visual = _coerce_bool(meta.get("describe_visual"), False)
+            extract_visual = _coerce_bool(meta.get("extract_visual"), False) or describe_visual
             record = TaskRecord(
                 id=task_id,
                 url=url,
                 language=_coerce_language(meta.get("requested_language"), self._settings.language),
-                extract_visual=_coerce_bool(meta.get("extract_visual"), False),
+                extract_visual=extract_visual,
+                describe_visual=describe_visual,
                 status="succeeded",
                 progress=100,
                 stage="done",
@@ -634,11 +651,14 @@ class TaskManager:
 
             now = _now()
             self._sequence += 1
+            describe_visual = _coerce_bool(job.get("describe_visual"), False)
+            extract_visual = _coerce_bool(job.get("extract_visual"), False) or describe_visual
             record = TaskRecord(
                 id=task_id,
                 url=url,
                 language=_coerce_language(job.get("language"), self._settings.language),
-                extract_visual=_coerce_bool(job.get("extract_visual"), False),
+                extract_visual=extract_visual,
+                describe_visual=describe_visual,
                 status="stopped",
                 progress=0,
                 stage="stopped",
@@ -672,6 +692,7 @@ class TaskManager:
             "url": record.url,
             "language": record.language,
             "extract_visual": record.extract_visual,
+            "describe_visual": record.describe_visual,
             "status": record.status,
             "progress": record.progress,
             "stage": record.stage,
@@ -849,7 +870,11 @@ def _coerce_bool(value: Any, fallback: bool) -> bool:
 
 
 def _hide_from_file_list(relative_path: str) -> bool:
-    return relative_path == "frames.json" or relative_path.startswith("frames/")
+    return (
+        relative_path == "frames.json"
+        or relative_path == "visual_description_cache.json"
+        or relative_path.startswith("frames/")
+    )
 
 
 def _coerce_language(value: Any, fallback: Language) -> Language:

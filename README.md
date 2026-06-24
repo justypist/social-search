@@ -39,6 +39,8 @@ uv run social-extract "https://example.com/video" \
 - `--device auto|cuda|cpu`：默认自动选择。
 - `--compute-type auto|float16|int8_float16|int8`：默认自动选择。
 - `--vad-filter/--no-vad-filter`：默认关闭 VAD 预过滤；长音频连续讲话时关闭通常更快。
+- `--extract-visual/--no-extract-visual`：默认关闭；开启后下载视频、抽取代表帧，并用本地 OCR 提取画面文字。
+- `--describe-visual/--no-describe-visual`：默认关闭；开启后复用代表帧，并用 Gemini 视觉能力总结关键帧中的图表、截图和示意图内容。
 - `--keep-media/--no-keep-media`：默认保留实际下载的音频或视频。
 - `--overwrite`：覆盖已存在的输出目录。
 - `--add-header "Name:Value"`：额外传给 `yt-dlp` 的 HTTP 请求头，可重复使用。
@@ -53,6 +55,8 @@ SOCIAL_SEARCH_COOKIES_FROM_BROWSER=chrome
 ```
 
 `SOCIAL_SEARCH_COOKIES` 使用 Netscape cookies.txt 文件，多个文件用分号 `;` 分隔，程序会在运行时合并后传给 `yt-dlp`；`SOCIAL_SEARCH_COOKIES_FROM_BROWSER` 可写 `chrome`、`firefox:default`、`chrome:Default` 等 `yt-dlp` 支持的格式。
+
+开启 `--describe-visual` 时，`SOCIAL_SEARCH_COOKIES` 还需要包含 `.google.com` 域的 `__Secure-1PSID`，用于初始化 Gemini client。
 
 ## Web 前端
 
@@ -86,8 +90,10 @@ pnpm dev
 ## 提取流程
 
 1. 用 `yt-dlp` 探测视频信息，优先下载已有字幕。
-2. 如果没有可用字幕，下载最佳音频并用本地 Whisper 转写。
-3. 如果音频下载失败，下载视频，用 `ffmpeg` 提取音频，再走 Whisper 转写。
+2. 如果开启画面文字提取，确保下载视频，抽帧并用本地 OCR 识别代表帧文字。
+3. 如果开启关键帧总结，复用去重后的代表帧并用 Gemini 生成 `visual_summary` 和 `visual_keywords`。
+4. 如果没有可用字幕，下载最佳音频并用本地 Whisper 转写；已因视觉功能下载视频时，会直接从该视频抽音频。
+5. 如果音频下载失败，下载视频，用 `ffmpeg` 提取音频，再走 Whisper 转写。
 
 ## 输出
 
@@ -101,6 +107,8 @@ out/
     subtitle.paragraph.srt
     transcript.txt
     transcript.json
+    pages.json     # 开启画面文字提取时保存
+    frames/        # 开启画面文字提取时保存代表帧
     audio.<fmt>     # 只有实际下载音频时保存
     video.<fmt>     # 只有实际下载视频时保存
 ```
@@ -112,6 +120,7 @@ out/
 - `subtitle.paragraph.srt`：按约一分钟聚合的段落版 SRT，适合直接阅读。
 - `transcript.txt`：纯文本，适合后续搜索索引。
 - `transcript.json`：结构化片段，包含每段的 `start`、`end` 和 `text`。
+- `pages.json`：结构化画面文字页，包含每页的 `start`、`end`、`text`、代表帧路径和置信度；开启关键帧总结后会追加 `visual_summary` 和 `visual_keywords`。
 
 ## 测试链接
 

@@ -31,7 +31,9 @@ const STAGE_LABELS = {
   visual_prepare: "准备视觉提取",
   visual_frames: "抽取视频帧",
   visual_detect: "检测文字画面",
+  visual_select: "选择代表帧",
   visual_ocr: "识别画面文字",
+  visual_describe: "总结关键帧",
   visual_write: "写入画面文字",
   write: "写入文件",
   cleanup: "清理媒体",
@@ -68,6 +70,7 @@ const elements = {
   urlInput: document.querySelector("#urlInput"),
   languageSelect: document.querySelector("#languageSelect"),
   extractVisualInput: document.querySelector("#extractVisualInput"),
+  describeVisualInput: document.querySelector("#describeVisualInput"),
   submitButton: document.querySelector("#submitButton"),
   formError: document.querySelector("#formError"),
   queueMeta: document.querySelector("#queueMeta"),
@@ -99,6 +102,16 @@ function init() {
   });
 
   elements.taskForm.addEventListener("submit", handleSubmit);
+  elements.describeVisualInput.addEventListener("change", () => {
+    if (elements.describeVisualInput.checked) {
+      elements.extractVisualInput.checked = true;
+    }
+  });
+  elements.extractVisualInput.addEventListener("change", () => {
+    if (!elements.extractVisualInput.checked) {
+      elements.describeVisualInput.checked = false;
+    }
+  });
   elements.refreshButton.addEventListener("click", () => refreshTasks({ quiet: false }));
   elements.taskList.addEventListener("click", handleTaskListClick);
   elements.detailActions.addEventListener("click", handleActionClick);
@@ -153,6 +166,7 @@ async function handleSubmit(event) {
   const url = elements.urlInput.value.trim();
   const language = elements.languageSelect.value;
   const extractVisual = elements.extractVisualInput.checked;
+  const describeVisual = elements.describeVisualInput.checked;
   elements.formError.textContent = "";
   if (!url) {
     elements.formError.textContent = "请输入视频链接";
@@ -165,10 +179,11 @@ async function handleSubmit(event) {
     const payload = await api("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, language, extract_visual: extractVisual }),
+      body: JSON.stringify({ url, language, extract_visual: extractVisual, describe_visual: describeVisual }),
     });
     elements.urlInput.value = "";
     elements.extractVisualInput.checked = false;
+    elements.describeVisualInput.checked = false;
     state.selectedId = payload.task.id;
     await refreshTasks({ quiet: true });
   } catch (error) {
@@ -284,6 +299,7 @@ function renderSubmitState() {
   elements.urlInput.disabled = state.isSubmitting;
   elements.languageSelect.disabled = state.isSubmitting;
   elements.extractVisualInput.disabled = state.isSubmitting;
+  elements.describeVisualInput.disabled = state.isSubmitting;
   elements.submitButton.classList.toggle("is-loading", state.isSubmitting);
   elements.submitButton.textContent = state.isSubmitting ? "提交中" : "加入队列";
 }
@@ -344,6 +360,7 @@ function renderDetail() {
           <div><dt>阶段</dt><dd>${escapeHtml(stageLabel(task.stage))}</dd></div>
           <div><dt>语言</dt><dd>${escapeHtml(languageLabel(task.language))}</dd></div>
           <div><dt>画面文字</dt><dd>${task.extract_visual ? "开启" : "关闭"}</dd></div>
+          <div><dt>关键帧总结</dt><dd>${task.describe_visual ? "开启" : "关闭"}</dd></div>
           <div><dt>来源</dt><dd>${escapeHtml(task.source || "-")}</dd></div>
           <div><dt>开始</dt><dd>${formatDate(task.started_at)}</dd></div>
           <div><dt>结束</dt><dd>${formatDate(task.finished_at)}</dd></div>

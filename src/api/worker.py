@@ -76,6 +76,7 @@ def _build_config(job: dict[str, Any]) -> ExtractConfig:
         cookie_files=_job_cookie_files(job),
         cookies_from_browser=job.get("cookies_from_browser"),
         extract_visual=bool(job.get("extract_visual", False)),
+        describe_visual=bool(job.get("describe_visual", False)),
     )
 
 

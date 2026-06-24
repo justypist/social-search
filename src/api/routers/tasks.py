@@ -17,6 +17,7 @@ class CreateTaskRequest(BaseModel):
     url: str = Field(min_length=1, max_length=4096)
     language: Literal["auto", "zh", "en"] | None = None
     extract_visual: bool = False
+    describe_visual: bool = False
 
 
 @router.get("")
@@ -34,6 +35,7 @@ async def create_task(
             request.url,
             language=request.language,
             extract_visual=request.extract_visual,
+            describe_visual=request.describe_visual,
         )
     }
 

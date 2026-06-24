@@ -7,6 +7,7 @@ def test_worker_config_defaults_extract_visual_false() -> None:
     config = _build_config(_job())
 
     assert config.extract_visual is False
+    assert config.describe_visual is False
 
 
 def test_worker_config_accepts_extract_visual_true() -> None:
@@ -16,6 +17,15 @@ def test_worker_config_accepts_extract_visual_true() -> None:
     config = _build_config(job)
 
     assert config.extract_visual is True
+
+
+def test_worker_config_accepts_describe_visual_true() -> None:
+    job = _job()
+    job["describe_visual"] = True
+
+    config = _build_config(job)
+
+    assert config.describe_visual is True
 
 
 def _job() -> dict:

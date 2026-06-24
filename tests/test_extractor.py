@@ -86,9 +86,10 @@ class FakeVisualExtractor:
         self.pages = [] if pages is None else pages
         self.error = error
         self.calls: list[Path] = []
+        self.configs: list[ExtractConfig] = []
 
     def extract(self, video_path: Path, output_dir: Path, config: ExtractConfig, *, progress_callback=None) -> VisualExtractionResult:
-        del config
+        self.configs.append(config)
         self.calls.append(video_path)
         if self.error is not None:
             raise self.error
@@ -319,6 +320,42 @@ def test_extract_visual_empty_pages_is_success(tmp_path: Path) -> None:
 
     assert result.pages_json_path is not None
     assert result.pages_json_path.exists()
+    assert result.meta["files"]["pages_json"] == "pages.json"
+
+
+def test_describe_visual_implies_visual_extraction(tmp_path: Path) -> None:
+    client = FakeMediaClient({"id": "describe-visual", "title": "Describe Visual"})
+    visual = FakeVisualExtractor(
+        pages=[
+            {
+                "page_index": 0,
+                "start": 0.0,
+                "end": 1.0,
+                "text": "Slide title",
+                "frame_path": "frames/page_0000.jpg",
+                "confidence": 0.9,
+                "visual_summary": "页面包含图表。",
+                "visual_keywords": ["图表"],
+            }
+        ]
+    )
+
+    result = Extractor(
+        media_client=client,
+        transcriber=FakeTranscriber(),
+        audio_extractor=FakeAudioExtractor(),
+        visual_extractor=visual,
+    ).extract(
+        "https://example.test/video",
+        ExtractConfig(output_root=tmp_path, describe_visual=True),
+    )
+
+    assert client.downloaded_video
+    assert not client.downloaded_audio
+    assert visual.calls == [result.video_path]
+    assert visual.configs[0].describe_visual is True
+    assert result.meta["extract_visual"] is True
+    assert result.meta["describe_visual"] is True
     assert result.meta["files"]["pages_json"] == "pages.json"
 
 

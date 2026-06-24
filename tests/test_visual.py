@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from social_extract.frames import FrameExtractionResult, FrameRef
 from social_extract.models import ExtractConfig
 from social_extract.ocr import OcrResult
 from social_extract.visual import VisualExtractor
+from social_extract.visual_description import VisualDescriptionResult
 from social_extract.vision import TextDedup
 
 
@@ -160,3 +163,106 @@ def test_visual_extractor_deduplicates_incremental_pages(tmp_path: Path) -> None
     assert payload["pages"][0]["start"] == 0.0
     assert payload["pages"][0]["end"] == 2.0
     assert payload["pages"][0]["text"] == "Agenda\nItem one\nItem two"
+
+
+def test_visual_extractor_reports_representative_frame_selection_progress(tmp_path: Path) -> None:
+    events: list[tuple[str, str, float | None]] = []
+    extractor = VisualExtractor(
+        frame_extractor=FakeFrameExtractor(12),
+        ocr_recognizer=MappingOcrRecognizer({"000001.jpg": "Slide"}),
+        has_text_detector=SequenceHasTextDetector([True] * 12),
+        page_change_detector=StaticPageChangeDetector(changed=False),
+    )
+
+    extractor.extract(
+        tmp_path / "video.mp4",
+        tmp_path,
+        ExtractConfig(output_root=tmp_path, visual_text_min_chars=1),
+        progress_callback=lambda stage, message, progress: events.append((stage, message, progress)),
+    )
+
+    select_events = [event for event in events if event[0] == "visual_select"]
+    assert select_events[0][1] == "选择代表帧 0.0%"
+    assert select_events[-1][1] == "选择代表帧 100.0%"
+
+
+def test_visual_extractor_default_ocr_uses_rapidocr(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeRapidOcrRecognizer:
+        def recognize(self, frame_path: Path) -> OcrResult:
+            captured["recognized_frame"] = frame_path.name
+            return OcrResult(texts=["RapidOCR slide text"], scores=[0.8], boxes=[])
+
+    monkeypatch.setattr("social_extract.visual.RapidOcrRecognizer", FakeRapidOcrRecognizer)
+    extractor = VisualExtractor(
+        frame_extractor=FakeFrameExtractor(2),
+        has_text_detector=SequenceHasTextDetector([True, True]),
+        page_change_detector=StaticPageChangeDetector(changed=False),
+    )
+
+    result = extractor.extract(
+        tmp_path / "video.mp4",
+        tmp_path,
+        ExtractConfig(
+            output_root=tmp_path,
+            visual_text_min_chars=1,
+        ),
+    )
+
+    payload = json.loads(result.pages_json_path.read_text(encoding="utf-8"))
+    assert captured["recognized_frame"] == "000001.jpg"
+    assert payload["pages"][0]["text"] == "RapidOCR slide text"
+
+
+def test_visual_extractor_describes_deduplicated_page_frames(tmp_path: Path) -> None:
+    class FakeVisualDescriber:
+        def describe_pages(self, pages, output_dir, config, *, progress_callback=None):
+            del output_dir, config, progress_callback
+            described = [dict(page) for page in pages]
+            described[0].update(
+                {
+                    "visual_summary": "页面包含系统架构图。",
+                    "visual_keywords": ["系统架构", "服务"],
+                    "visual_content_type": "architecture_diagram",
+                    "visual_confidence": 0.88,
+                    "visual_provider": "gemini",
+                    "visual_model": "default",
+                    "visual_cache_hit": False,
+                }
+            )
+            return VisualDescriptionResult(
+                pages=described,
+                meta={
+                    "enabled": True,
+                    "provider": "gemini",
+                    "model": "default",
+                    "candidate_pages": 1,
+                    "described_pages": 1,
+                    "cache_hits": 0,
+                    "skipped_pages": 0,
+                    "failed_pages": 0,
+                },
+            )
+
+    extractor = VisualExtractor(
+        frame_extractor=FakeFrameExtractor(2),
+        ocr_recognizer=MappingOcrRecognizer({"000001.jpg": "Architecture"}),
+        has_text_detector=SequenceHasTextDetector([True, True]),
+        page_change_detector=StaticPageChangeDetector(changed=False),
+        visual_describer=FakeVisualDescriber(),
+    )
+
+    result = extractor.extract(
+        tmp_path / "video.mp4",
+        tmp_path,
+        ExtractConfig(output_root=tmp_path, describe_visual=True, visual_text_min_chars=1),
+    )
+
+    payload = json.loads(result.pages_json_path.read_text(encoding="utf-8"))
+    assert payload["pages"][0]["visual_summary"] == "页面包含系统架构图。"
+    assert payload["pages"][0]["visual_keywords"] == ["系统架构", "服务"]
+    assert payload["visual_description"]["described_pages"] == 1

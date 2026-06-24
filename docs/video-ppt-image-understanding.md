@@ -128,18 +128,22 @@ OCR
 - 对图表趋势、坐标轴、架构关系的解释容易漏项或幻觉。
 - 部署成本较高，需要 GPU、模型管理和推理服务。
 
-### 在线 API
+### Gemini client
 
-在线多模态 API 更适合生成高质量可搜索描述，尤其是图表、流程图、产品截图和复杂页面。成本风险主要来自调用数量，而不是单页成本。
+第一期使用项目已有的 `gemini_client.py` 创建 `gemini_webapi.GeminiClient`，通过 `generate_content(prompt, files=[frame_path])` 对去重后的代表页截图生成结构化描述。它只用于关键帧总结，不替代画面文字 OCR。
+
+Gemini 更适合生成高质量可搜索描述，尤其是图表、流程图、产品截图和复杂页面。成本风险主要来自调用数量，而不是单页成本。
 
 本需求的成本控制原则：
 
 - 不把完整视频或所有 frames 发送给 API。
 - 本地完成抽帧、PPT 页检测、OCR、去重和缓存。
-- API 只接收最终代表页截图。
+- Gemini 只接收最终代表页截图。
 - 优先使用低成本视觉模型。
 - 对低置信度或复杂图表再选择性升级到更强模型。
 - 支持批处理模式，允许牺牲实时性换取更低成本。
+
+Gemini client 的 cookie 来源沿用 `SOCIAL_SEARCH_COOKIES`。开启 `describe_visual` 时，cookie 文件需要包含 `.google.com` 域的 `__Secure-1PSID`。
 
 ## 成本控制策略
 
@@ -248,8 +252,8 @@ OCR
 建议默认策略：
 
 - OCR 和代表页生成失败：沿用现有视觉提取失败策略。
-- 视觉描述 API 单页失败：记录该页失败，继续处理其他页。
-- API 全局不可用：任务可配置为失败或降级。
+- 视觉描述单页失败：记录该页失败，继续处理其他页。
+- Gemini 全局不可用：任务可配置为失败或降级。
 - 输出 JSON 解析失败：重试一次；仍失败则记录原始错误并跳过该页。
 
 建议新增配置：
@@ -282,7 +286,7 @@ visual_description_model: str | None = None
 
 - 新增 `describe_visual` 配置链路。
 - 复用现有 `pages.json` 代表帧。
-- 实现视觉描述器接口和一个在线 API provider。
+- 实现视觉描述器接口和 Gemini provider。
 - 增加缓存、页数上限和失败降级。
 - 将 `visual_summary`、`visual_keywords` 写入 `pages.json`。
 

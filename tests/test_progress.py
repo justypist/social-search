@@ -23,5 +23,7 @@ def test_live_progress_messages_are_identified() -> None:
     assert is_live_progress_message("download_audio", "下载中 50.0%")
     assert is_live_progress_message("transcribe", "转写中 25.0%")
     assert is_live_progress_message("visual_detect", "检测文字画面 50.0%")
+    assert is_live_progress_message("visual_select", "选择代表帧 50.0%")
     assert is_live_progress_message("visual_ocr", "识别画面文字 50.0%")
+    assert is_live_progress_message("visual_describe", "总结关键帧 50.0%")
     assert not is_live_progress_message("write", "正在写入字幕和转写文件")

@@ -48,6 +48,10 @@ def main(
         bool,
         typer.Option("--extract-visual/--no-extract-visual", help="Extract searchable text from video frames."),
     ] = False,
+    describe_visual: Annotated[
+        bool,
+        typer.Option("--describe-visual/--no-describe-visual", help="Summarize representative keyframes with Gemini."),
+    ] = False,
     keep_media: Annotated[
         bool,
         typer.Option("--keep-media/--no-keep-media", help="Keep downloaded audio/video files."),
@@ -73,6 +77,7 @@ def main(
         compute_type=compute_type,
         vad_filter=vad_filter,
         extract_visual=extract_visual,
+        describe_visual=describe_visual,
         keep_media=keep_media,
         overwrite=overwrite,
         http_headers=headers,

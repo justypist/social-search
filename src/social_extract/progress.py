@@ -29,6 +29,10 @@ def is_live_progress_message(stage: str, message: str) -> bool:
         return message.startswith("转写中")
     if stage == "visual_detect":
         return message.startswith("检测文字画面 ")
+    if stage == "visual_select":
+        return message.startswith("选择代表帧 ")
     if stage == "visual_ocr":
         return message.startswith("识别画面文字 ")
+    if stage == "visual_describe":
+        return message.startswith("总结关键帧 ")
     return False

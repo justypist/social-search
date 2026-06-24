@@ -372,6 +372,7 @@ dependencies = [
 visual_prepare: "准备视觉提取",
 visual_frames: "抽取视频帧",
 visual_detect: "检测文字画面",
+visual_select: "选择代表帧",
 visual_ocr: "识别画面文字",
 visual_write: "写入画面文字",
 ```

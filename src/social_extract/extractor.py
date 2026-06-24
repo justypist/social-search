@@ -95,13 +95,14 @@ class Extractor:
         self._emit_progress("prepare", "正在准备输出目录", 0.12)
         output_dir = prepare_output_dir(config.output_root, info, url, config.overwrite)
         state = ExtractionState()
+        visual_enabled = _visual_enabled(config)
 
         transcript = self._try_downloaded_subtitle(media_client, info, config, state)
-        if config.extract_visual:
+        if visual_enabled:
             self._ensure_visual_video(media_client, url, output_dir, state)
         if transcript is None:
             transcript = self._transcribe_media(media_client, url, output_dir, config, state)
-        if config.extract_visual:
+        if visual_enabled:
             self._extract_visual(output_dir, config, state)
 
         subtitle_path = output_dir / "subtitle.srt"
@@ -110,14 +111,14 @@ class Extractor:
         transcript_json_path = output_dir / "transcript.json"
         meta_path = output_dir / "meta.json"
 
-        self._emit_progress("write", "正在写入字幕和转写文件", 0.94 if config.extract_visual else 0.92)
+        self._emit_progress("write", "正在写入字幕和转写文件", 0.94 if visual_enabled else 0.92)
         write_srt(transcript, subtitle_path)
         write_paragraph_srt(transcript, paragraph_subtitle_path)
         write_transcript_text(transcript, transcript_text_path)
         write_transcript_json(transcript, transcript_json_path)
 
         if not config.keep_media:
-            self._emit_progress("cleanup", "正在清理媒体文件", 0.97 if config.extract_visual else 0.95)
+            self._emit_progress("cleanup", "正在清理媒体文件", 0.97 if visual_enabled else 0.95)
             self._remove_media(state)
 
         meta = self._build_meta(
@@ -176,7 +177,7 @@ class Extractor:
             return None
 
         state.source = "downloaded_subtitle"
-        self._emit_progress("subtitle", "已使用视频自带字幕", 0.34 if config.extract_visual else 0.84)
+        self._emit_progress("subtitle", "已使用视频自带字幕", 0.34 if _visual_enabled(config) else 0.84)
         return transcript
 
     def _transcribe_media(
@@ -187,7 +188,7 @@ class Extractor:
         config: ExtractConfig,
         state: ExtractionState,
     ) -> Transcript:
-        if config.extract_visual and state.video_path is not None:
+        if _visual_enabled(config) and state.video_path is not None:
             self._emit_progress("extract_audio", "正在从视频提取音频", 0.56)
             state.audio_path = self._audio_extractor.extract(state.video_path, output_dir)
             state.source = "video_audio_transcribe"
@@ -260,6 +261,7 @@ class Extractor:
         )
         state.pages_json_path = result.pages_json_path
         state.frames_dir = result.frames_dir
+        state.visual_description = result.payload.get("visual_description")
 
     def _build_meta(
         self,
@@ -281,18 +283,19 @@ class Extractor:
             "audio": relative_or_name(state.audio_path, output_dir),
             "video": relative_or_name(state.video_path, output_dir),
         }
-        if config.extract_visual:
+        if _visual_enabled(config):
             files["pages_json"] = relative_or_name(state.pages_json_path, output_dir)
             files["visual_frames"] = relative_or_name(state.frames_dir, output_dir)
 
-        return {
+        meta = {
             "url": url,
             "resolved_url": info.get("webpage_url") or info.get("original_url"),
             "extracted_at": dt.datetime.now(dt.UTC).isoformat(),
             "source": state.source,
             "language": transcript.language,
             "requested_language": config.language,
-            "extract_visual": config.extract_visual,
+            "extract_visual": _visual_enabled(config),
+            "describe_visual": config.describe_visual,
             "vad_filter": config.vad_filter,
             "request_headers": sorted(config.http_headers),
             "cookie_file": bool(config.configured_cookie_files),
@@ -319,6 +322,9 @@ class Extractor:
             "elapsed_seconds": round(elapsed_seconds, 3),
             "notes": state.notes,
         }
+        if state.visual_description is not None:
+            meta["visual_description"] = state.visual_description
+        return meta
 
     @staticmethod
     def _remove_media(state: ExtractionState) -> None:
@@ -335,3 +341,7 @@ class Extractor:
 
     def _stage_progress_callback(self, stage: str, start: float, end: float) -> StageProgressCallback:
         return stage_progress_callback(self._progress_callback, stage, start, end)
+
+
+def _visual_enabled(config: ExtractConfig) -> bool:
+    return config.extract_visual or config.describe_visual

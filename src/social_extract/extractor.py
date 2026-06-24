@@ -20,6 +20,7 @@ from .paths import prepare_output_dir, relative_or_name
 from .progress import ProgressCallback, StageProgressCallback, stage_progress_callback
 from .subtitles import select_subtitle
 from .transcriber import FasterWhisperTranscriber, Transcriber
+from .visual import VisualExtractionResult, VisualExtractor
 from .yt_dlp_client import YtDlpClient
 
 
@@ -54,6 +55,18 @@ class AudioExtractor(Protocol):
         ...
 
 
+class VisualTextExtractor(Protocol):
+    def extract(
+        self,
+        video_path: Path,
+        output_dir: Path,
+        config: ExtractConfig,
+        *,
+        progress_callback: ProgressCallback | None = None,
+    ) -> VisualExtractionResult:
+        ...
+
+
 class Extractor:
     def __init__(
         self,
@@ -61,11 +74,13 @@ class Extractor:
         media_client: MediaClient | None = None,
         transcriber: Transcriber | None = None,
         audio_extractor: AudioExtractor | None = None,
+        visual_extractor: VisualTextExtractor | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> None:
         self._media_client = media_client
         self._transcriber = transcriber or FasterWhisperTranscriber()
         self._audio_extractor = audio_extractor or FfmpegAudioExtractor()
+        self._visual_extractor = visual_extractor
         self._progress_callback = progress_callback
 
     def extract(self, url: str, config: ExtractConfig) -> ExtractionResult:
@@ -82,8 +97,12 @@ class Extractor:
         state = ExtractionState()
 
         transcript = self._try_downloaded_subtitle(media_client, info, config, state)
+        if config.extract_visual:
+            self._ensure_visual_video(media_client, url, output_dir, state)
         if transcript is None:
             transcript = self._transcribe_media(media_client, url, output_dir, config, state)
+        if config.extract_visual:
+            self._extract_visual(output_dir, config, state)
 
         subtitle_path = output_dir / "subtitle.srt"
         paragraph_subtitle_path = output_dir / "subtitle.paragraph.srt"
@@ -91,14 +110,14 @@ class Extractor:
         transcript_json_path = output_dir / "transcript.json"
         meta_path = output_dir / "meta.json"
 
-        self._emit_progress("write", "正在写入字幕和转写文件", 0.92)
+        self._emit_progress("write", "正在写入字幕和转写文件", 0.94 if config.extract_visual else 0.92)
         write_srt(transcript, subtitle_path)
         write_paragraph_srt(transcript, paragraph_subtitle_path)
         write_transcript_text(transcript, transcript_text_path)
         write_transcript_json(transcript, transcript_json_path)
 
         if not config.keep_media:
-            self._emit_progress("cleanup", "正在清理媒体文件", 0.95)
+            self._emit_progress("cleanup", "正在清理媒体文件", 0.97 if config.extract_visual else 0.95)
             self._remove_media(state)
 
         meta = self._build_meta(
@@ -125,6 +144,8 @@ class Extractor:
             meta_path=meta_path,
             audio_path=state.audio_path if config.keep_media else None,
             video_path=state.video_path if config.keep_media else None,
+            pages_json_path=state.pages_json_path,
+            frames_dir=state.frames_dir,
         )
 
     def _try_downloaded_subtitle(
@@ -155,7 +176,7 @@ class Extractor:
             return None
 
         state.source = "downloaded_subtitle"
-        self._emit_progress("subtitle", "已使用视频自带字幕", 0.84)
+        self._emit_progress("subtitle", "已使用视频自带字幕", 0.34 if config.extract_visual else 0.84)
         return transcript
 
     def _transcribe_media(
@@ -166,27 +187,36 @@ class Extractor:
         config: ExtractConfig,
         state: ExtractionState,
     ) -> Transcript:
-        try:
-            self._emit_progress("download_audio", "正在下载音频", 0.38)
-            state.audio_path = media_client.download_audio(
-                url,
-                output_dir,
-                progress_callback=self._stage_progress_callback("download_audio", 0.38, 0.64),
-            )
-            state.source = "audio_transcribe"
-        except ExtractionError as exc:
-            state.notes.append(f"Audio download failed: {exc}")
-            self._emit_progress("download_video", "音频下载失败，正在下载视频", 0.48)
-            state.video_path = media_client.download_video(
-                url,
-                output_dir,
-                progress_callback=self._stage_progress_callback("download_video", 0.48, 0.58),
-            )
-            self._emit_progress("extract_audio", "正在从视频提取音频", 0.58)
+        if config.extract_visual and state.video_path is not None:
+            self._emit_progress("extract_audio", "正在从视频提取音频", 0.56)
             state.audio_path = self._audio_extractor.extract(state.video_path, output_dir)
             state.source = "video_audio_transcribe"
+            transcribe_start = 0.6
+            transcribe_end = 0.72
+        else:
+            transcribe_start = 0.68
+            transcribe_end = 0.88
+            try:
+                self._emit_progress("download_audio", "正在下载音频", 0.38)
+                state.audio_path = media_client.download_audio(
+                    url,
+                    output_dir,
+                    progress_callback=self._stage_progress_callback("download_audio", 0.38, 0.64),
+                )
+                state.source = "audio_transcribe"
+            except ExtractionError as exc:
+                state.notes.append(f"Audio download failed: {exc}")
+                self._emit_progress("download_video", "音频下载失败，正在下载视频", 0.48)
+                state.video_path = media_client.download_video(
+                    url,
+                    output_dir,
+                    progress_callback=self._stage_progress_callback("download_video", 0.48, 0.58),
+                )
+                self._emit_progress("extract_audio", "正在从视频提取音频", 0.58)
+                state.audio_path = self._audio_extractor.extract(state.video_path, output_dir)
+                state.source = "video_audio_transcribe"
 
-        self._emit_progress("transcribe", "正在本地转写音频", 0.68)
+        self._emit_progress("transcribe", "正在本地转写音频", transcribe_start)
         state.whisper = self._transcriber.transcribe(
             state.audio_path,
             language=config.language,
@@ -194,10 +224,42 @@ class Extractor:
             device=config.device,
             compute_type=config.compute_type,
             vad_filter=config.vad_filter,
-            progress_callback=self._stage_progress_callback("transcribe", 0.68, 0.88),
+            progress_callback=self._stage_progress_callback("transcribe", transcribe_start, transcribe_end),
         )
-        self._emit_progress("transcribe", "转写完成", 0.88)
+        self._emit_progress("transcribe", "转写完成", transcribe_end)
         return state.whisper.transcript
+
+    def _ensure_visual_video(
+        self,
+        media_client: MediaClient,
+        url: str,
+        output_dir: Path,
+        state: ExtractionState,
+    ) -> None:
+        if state.video_path is not None:
+            return
+        try:
+            self._emit_progress("visual_prepare", "准备视觉提取", 0.36)
+            state.video_path = media_client.download_video(
+                url,
+                output_dir,
+                progress_callback=self._stage_progress_callback("download_video", 0.38, 0.54),
+            )
+        except ExtractionError:
+            raise
+
+    def _extract_visual(self, output_dir: Path, config: ExtractConfig, state: ExtractionState) -> None:
+        if state.video_path is None:
+            raise ExtractionError("visual extraction requires a downloaded video file")
+        extractor = self._visual_extractor or VisualExtractor()
+        result = extractor.extract(
+            state.video_path,
+            output_dir,
+            config,
+            progress_callback=self._progress_callback,
+        )
+        state.pages_json_path = result.pages_json_path
+        state.frames_dir = result.frames_dir
 
     def _build_meta(
         self,
@@ -211,6 +273,18 @@ class Extractor:
         elapsed_seconds: float,
     ) -> dict[str, Any]:
         whisper = state.whisper
+        files = {
+            "subtitle_srt": "subtitle.srt",
+            "paragraph_srt": "subtitle.paragraph.srt",
+            "transcript_txt": "transcript.txt",
+            "transcript_json": "transcript.json",
+            "audio": relative_or_name(state.audio_path, output_dir),
+            "video": relative_or_name(state.video_path, output_dir),
+        }
+        if config.extract_visual:
+            files["pages_json"] = relative_or_name(state.pages_json_path, output_dir)
+            files["visual_frames"] = relative_or_name(state.frames_dir, output_dir)
+
         return {
             "url": url,
             "resolved_url": info.get("webpage_url") or info.get("original_url"),
@@ -218,6 +292,7 @@ class Extractor:
             "source": state.source,
             "language": transcript.language,
             "requested_language": config.language,
+            "extract_visual": config.extract_visual,
             "vad_filter": config.vad_filter,
             "request_headers": sorted(config.http_headers),
             "cookie_file": bool(config.configured_cookie_files),
@@ -231,14 +306,7 @@ class Extractor:
                 "channel": info.get("channel"),
                 "upload_date": info.get("upload_date"),
             },
-            "files": {
-                "subtitle_srt": "subtitle.srt",
-                "paragraph_srt": "subtitle.paragraph.srt",
-                "transcript_txt": "transcript.txt",
-                "transcript_json": "transcript.json",
-                "audio": relative_or_name(state.audio_path, output_dir),
-                "video": relative_or_name(state.video_path, output_dir),
-            },
+            "files": files,
             "whisper": None
             if whisper is None
             else {

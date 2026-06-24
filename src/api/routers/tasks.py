@@ -16,6 +16,7 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 class CreateTaskRequest(BaseModel):
     url: str = Field(min_length=1, max_length=4096)
     language: Literal["auto", "zh", "en"] | None = None
+    extract_visual: bool = False
 
 
 @router.get("")
@@ -28,7 +29,13 @@ async def create_task(
     request: CreateTaskRequest,
     manager: TaskManager = Depends(get_task_manager),
 ) -> dict[str, Any]:
-    return {"task": await manager.create_task(request.url, language=request.language)}
+    return {
+        "task": await manager.create_task(
+            request.url,
+            language=request.language,
+            extract_visual=request.extract_visual,
+        )
+    }
 
 
 @router.get("/{task_id}")

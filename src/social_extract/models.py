@@ -45,6 +45,20 @@ class ExtractConfig:
     cookie_file: Path | None = None
     cookie_files: tuple[Path, ...] = ()
     cookies_from_browser: str | None = None
+    extract_visual: bool = False
+    frame_fps: float = 1.0
+    has_text_variance_min: float = 20.0
+    has_text_skin_ratio_max: float = 0.15
+    has_text_row_edge_std_min: float = 1.5
+    has_text_min_consecutive_frames: int = 2
+    page_change_ssim_threshold: float = 0.85
+    page_change_phash_threshold: int = 20
+    page_change_phash_delta: int = 12
+    stable_frame_count: int = 2
+    stable_ssim_threshold: float = 0.95
+    visual_text_min_chars: int = 10
+    text_dedup_jaccard_threshold: float = 0.9
+    text_dedup_containment_threshold: float = 0.85
 
     @property
     def configured_cookie_files(self) -> tuple[Path, ...]:
@@ -77,6 +91,8 @@ class ExtractionResult:
     meta_path: Path
     audio_path: Path | None = None
     video_path: Path | None = None
+    pages_json_path: Path | None = None
+    frames_dir: Path | None = None
 
 
 @dataclass
@@ -84,5 +100,7 @@ class ExtractionState:
     source: str = ""
     audio_path: Path | None = None
     video_path: Path | None = None
+    pages_json_path: Path | None = None
+    frames_dir: Path | None = None
     whisper: TranscriptionResult | None = None
     notes: list[str] = field(default_factory=list)

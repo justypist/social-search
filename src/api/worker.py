@@ -55,6 +55,8 @@ def main(argv: list[str] | None = None) -> int:
             "meta_path": str(result.meta_path),
             "audio_path": str(result.audio_path) if result.audio_path else None,
             "video_path": str(result.video_path) if result.video_path else None,
+            "pages_json_path": str(result.pages_json_path) if result.pages_json_path else None,
+            "frames_dir": str(result.frames_dir) if result.frames_dir else None,
         }
     )
     return 0
@@ -73,6 +75,7 @@ def _build_config(job: dict[str, Any]) -> ExtractConfig:
         http_headers=job["http_headers"],
         cookie_files=_job_cookie_files(job),
         cookies_from_browser=job.get("cookies_from_browser"),
+        extract_visual=bool(job.get("extract_visual", False)),
     )
 
 

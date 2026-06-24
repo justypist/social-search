@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from api.settings import WebSettings
+from api.routers.tasks import CreateTaskRequest
 from api.task_manager import TaskManager
 
 
@@ -129,7 +130,73 @@ async def _create_task_defaults_to_configured_language(tmp_path: Path) -> None:
     record = manager._tasks[task_id]
 
     assert created["language"] == "en"
+    assert created["extract_visual"] is False
     assert manager._job_payload(record)["language"] == "en"
+    assert manager._job_payload(record)["extract_visual"] is False
+
+
+def test_create_task_persists_extract_visual_choice(tmp_path: Path) -> None:
+    asyncio.run(_create_task_persists_extract_visual_choice(tmp_path))
+
+
+async def _create_task_persists_extract_visual_choice(tmp_path: Path) -> None:
+    state_dir = tmp_path / "state"
+    manager = TaskManager(_settings(tmp_path), state_dir=state_dir)
+
+    created = await manager.create_task("https://example.test/video", extract_visual=True)
+    task_id = created["id"]
+    record = manager._tasks[task_id]
+    payload = manager._job_payload(record)
+    stored = json.loads((state_dir / "tasks.json").read_text(encoding="utf-8"))
+
+    assert created["extract_visual"] is True
+    assert record.extract_visual is True
+    assert payload["extract_visual"] is True
+    assert stored["tasks"][0]["extract_visual"] is True
+
+
+def test_create_task_request_defaults_extract_visual_false() -> None:
+    request = CreateTaskRequest(url="https://example.test/video")
+
+    assert request.extract_visual is False
+
+
+def test_visual_progress_logs_replace_previous_progress_message(tmp_path: Path) -> None:
+    asyncio.run(_visual_progress_logs_replace_previous_progress_message(tmp_path))
+
+
+async def _visual_progress_logs_replace_previous_progress_message(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    created = await manager.create_task("https://example.test/video", extract_visual=True)
+    task_id = created["id"]
+
+    await manager._handle_worker_line(
+        task_id,
+        json.dumps(
+            {
+                "type": "progress",
+                "stage": "visual_detect",
+                "message": "检测文字画面 25.0%",
+                "progress": 0.81,
+            }
+        ),
+    )
+    await manager._handle_worker_line(
+        task_id,
+        json.dumps(
+            {
+                "type": "progress",
+                "stage": "visual_detect",
+                "message": "检测文字画面 50.0%",
+                "progress": 0.82,
+            }
+        ),
+    )
+
+    task = await manager.get_task(task_id)
+    progress_logs = [entry for entry in task["logs"] if entry["level"] == "progress"]
+    assert len(progress_logs) == 1
+    assert progress_logs[0]["message"] == "检测文字画面 50.0%"
 
 
 def test_job_payload_includes_cookie_settings(tmp_path: Path) -> None:
@@ -210,6 +277,22 @@ async def _delete_task_removes_output_directory_and_persisted_record(tmp_path: P
 
 def test_delete_failed_duplicate_download_removes_existing_output_directory(tmp_path: Path) -> None:
     asyncio.run(_delete_failed_duplicate_download_removes_existing_output_directory(tmp_path))
+
+
+def test_scan_files_hides_visual_frame_outputs(tmp_path: Path) -> None:
+    manager = _manager(tmp_path)
+    output_dir = tmp_path / "output" / "video"
+    frames_dir = output_dir / "frames"
+    frames_dir.mkdir(parents=True)
+    (output_dir / "subtitle.srt").write_text("subtitle\n", encoding="utf-8")
+    (output_dir / "pages.json").write_text("{}\n", encoding="utf-8")
+    (output_dir / "frames.json").write_text("{}\n", encoding="utf-8")
+    (frames_dir / "000001.jpg").write_bytes(b"frame")
+    (frames_dir / "page_0000.jpg").write_bytes(b"page")
+
+    files = manager._scan_files("task-id", output_dir)
+
+    assert [file["name"] for file in files] == ["pages.json", "subtitle.srt"]
 
 
 async def _delete_failed_duplicate_download_removes_existing_output_directory(tmp_path: Path) -> None:

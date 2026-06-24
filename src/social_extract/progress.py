@@ -23,6 +23,12 @@ def stage_progress_callback(
 
 
 def is_live_progress_message(stage: str, message: str) -> bool:
-    if stage not in {"download_audio", "download_video", "transcribe"}:
-        return False
-    return message.startswith(("下载中", "转写中")) or message in {"下载完成"}
+    if stage in {"download_audio", "download_video"}:
+        return message.startswith("下载中") or message == "下载完成"
+    if stage == "transcribe":
+        return message.startswith("转写中")
+    if stage == "visual_detect":
+        return message.startswith("检测文字画面 ")
+    if stage == "visual_ocr":
+        return message.startswith("识别画面文字 ")
+    return False

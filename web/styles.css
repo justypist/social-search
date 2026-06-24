@@ -293,6 +293,22 @@ h3 {
   width: 100%;
 }
 
+.checkbox-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  color: var(--muted-strong);
+  font-size: 13px;
+}
+
+.checkbox-control input {
+  width: 16px;
+  min-height: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
 .form-error {
   min-height: 18px;
   color: var(--danger);

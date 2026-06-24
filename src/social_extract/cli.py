@@ -44,6 +44,10 @@ def main(
         bool,
         typer.Option("--vad-filter/--no-vad-filter", help="Enable faster-whisper VAD pre-filtering."),
     ] = False,
+    extract_visual: Annotated[
+        bool,
+        typer.Option("--extract-visual/--no-extract-visual", help="Extract searchable text from video frames."),
+    ] = False,
     keep_media: Annotated[
         bool,
         typer.Option("--keep-media/--no-keep-media", help="Keep downloaded audio/video files."),
@@ -68,6 +72,7 @@ def main(
         device=device.value,
         compute_type=compute_type,
         vad_filter=vad_filter,
+        extract_visual=extract_visual,
         keep_media=keep_media,
         overwrite=overwrite,
         http_headers=headers,
@@ -89,6 +94,8 @@ def main(
     console.print(f"SRT: {result.subtitle_path}")
     console.print(f"Paragraph SRT: {result.paragraph_subtitle_path}")
     console.print(f"Text: {result.transcript_text_path}")
+    if result.pages_json_path is not None:
+        console.print(f"Pages: {result.pages_json_path}")
     console.print(f"Metadata: {result.meta_path}")
 
 

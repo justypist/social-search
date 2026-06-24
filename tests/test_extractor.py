@@ -6,7 +6,9 @@ import pytest
 
 from social_extract.errors import ExtractionError
 from social_extract.extractor import Extractor
+from social_extract.formats import write_json
 from social_extract.models import ExtractConfig, Segment, SubtitleRef, TranscriptionResult, Transcript
+from social_extract.visual import VisualExtractionResult
 
 
 class FakeMediaClient:
@@ -69,10 +71,47 @@ class FakeTranscriber:
 
 
 class FakeAudioExtractor:
+    def __init__(self) -> None:
+        self.calls: list[Path] = []
+
     def extract(self, video_path: Path, output_dir: Path) -> Path:
+        self.calls.append(video_path)
         path = output_dir / "audio.wav"
         path.write_bytes(b"wav")
         return path
+
+
+class FakeVisualExtractor:
+    def __init__(self, *, pages: list[dict] | None = None, error: Exception | None = None) -> None:
+        self.pages = [] if pages is None else pages
+        self.error = error
+        self.calls: list[Path] = []
+
+    def extract(self, video_path: Path, output_dir: Path, config: ExtractConfig, *, progress_callback=None) -> VisualExtractionResult:
+        del config
+        self.calls.append(video_path)
+        if self.error is not None:
+            raise self.error
+        frames_dir = output_dir / "frames"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        for index, _page in enumerate(self.pages):
+            (frames_dir / f"page_{index:04d}.jpg").write_bytes(b"frame")
+        pages_json_path = output_dir / "pages.json"
+        payload = {
+            "frame_fps": 1.0,
+            "pages": self.pages,
+            "non_text_segments": [],
+            "stats": {
+                "sampled_frames": 1,
+                "text_frames": 1,
+                "ocr_frames": len(self.pages),
+                "pages": len(self.pages),
+            },
+        }
+        write_json(payload, pages_json_path)
+        if progress_callback is not None:
+            progress_callback("visual_write", "写入画面文字", 0.9)
+        return VisualExtractionResult(pages_json_path=pages_json_path, frames_dir=frames_dir, payload=payload)
 
 
 def test_downloaded_subtitle_is_used_before_audio(tmp_path: Path) -> None:
@@ -103,6 +142,8 @@ def test_downloaded_subtitle_is_used_before_audio(tmp_path: Path) -> None:
     assert result.transcript_text_path.read_text(encoding="utf-8") == "hello\n"
     assert result.meta["files"]["paragraph_srt"] == "subtitle.paragraph.srt"
     assert not client.downloaded_audio
+    assert not client.downloaded_video
+    assert "pages_json" not in result.meta["files"]
     assert transcriber.calls == []
 
 
@@ -156,6 +197,144 @@ def test_video_fallback_when_audio_download_fails(tmp_path: Path) -> None:
     assert result.audio_path is not None
     assert result.audio_path.name == "audio.wav"
     assert result.meta["files"]["video"] == "video.mp4"
+
+
+def test_extract_visual_with_downloaded_subtitle_still_downloads_video_and_pages(tmp_path: Path) -> None:
+    client = FakeMediaClient(
+        {
+            "id": "visual-subtitle",
+            "title": "Visual Subtitle",
+            "subtitles": {
+                "en": [
+                    {
+                        "ext": "vtt",
+                        "data": "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nhello\n",
+                    }
+                ]
+            },
+        }
+    )
+    visual = FakeVisualExtractor(
+        pages=[
+            {
+                "page_index": 0,
+                "start": 0.0,
+                "end": 1.0,
+                "text": "Slide title",
+                "frame_path": "frames/page_0000.jpg",
+                "confidence": 0.9,
+            }
+        ]
+    )
+    transcriber = FakeTranscriber()
+
+    result = Extractor(media_client=client, transcriber=transcriber, visual_extractor=visual).extract(
+        "https://example.test/video",
+        ExtractConfig(output_root=tmp_path, language="en", extract_visual=True),
+    )
+
+    assert result.source == "downloaded_subtitle"
+    assert client.downloaded_video
+    assert not client.downloaded_audio
+    assert transcriber.calls == []
+    assert visual.calls == [result.video_path]
+    assert result.pages_json_path is not None
+    assert result.pages_json_path.name == "pages.json"
+    assert result.frames_dir is not None
+    assert result.meta["files"]["pages_json"] == "pages.json"
+    assert result.meta["files"]["visual_frames"] == "frames"
+
+
+def test_extract_visual_reuses_video_for_transcription_without_audio_download(tmp_path: Path) -> None:
+    client = FakeMediaClient({"id": "visual-no-subs", "title": "Visual No Subs"})
+    transcriber = FakeTranscriber()
+    audio_extractor = FakeAudioExtractor()
+    visual = FakeVisualExtractor()
+
+    result = Extractor(
+        media_client=client,
+        transcriber=transcriber,
+        audio_extractor=audio_extractor,
+        visual_extractor=visual,
+    ).extract(
+        "https://example.test/video",
+        ExtractConfig(output_root=tmp_path, extract_visual=True),
+    )
+
+    assert result.source == "video_audio_transcribe"
+    assert client.downloaded_video
+    assert not client.downloaded_audio
+    assert result.video_path is not None
+    assert audio_extractor.calls == [result.video_path]
+    assert result.audio_path is not None
+    assert transcriber.calls == [result.audio_path]
+    assert visual.calls == [result.video_path]
+
+
+def test_keep_media_false_removes_audio_video_but_keeps_visual_outputs(tmp_path: Path) -> None:
+    client = FakeMediaClient({"id": "visual-cleanup"})
+    result = Extractor(
+        media_client=client,
+        transcriber=FakeTranscriber(),
+        audio_extractor=FakeAudioExtractor(),
+        visual_extractor=FakeVisualExtractor(
+            pages=[
+                {
+                    "page_index": 0,
+                    "start": 0.0,
+                    "end": 1.0,
+                    "text": "Slide title",
+                    "frame_path": "frames/page_0000.jpg",
+                    "confidence": 0.9,
+                }
+            ]
+        ),
+    ).extract(
+        "https://example.test/video",
+        ExtractConfig(output_root=tmp_path, extract_visual=True, keep_media=False),
+    )
+
+    assert result.audio_path is None
+    assert result.video_path is None
+    assert not (result.output_dir / "audio.wav").exists()
+    assert not (result.output_dir / "video.mp4").exists()
+    assert result.pages_json_path is not None
+    assert result.pages_json_path.exists()
+    assert result.frames_dir is not None
+    assert (result.frames_dir / "page_0000.jpg").exists()
+    assert result.meta["files"]["pages_json"] == "pages.json"
+    assert result.meta["files"]["visual_frames"] == "frames"
+
+
+def test_extract_visual_empty_pages_is_success(tmp_path: Path) -> None:
+    result = Extractor(
+        media_client=FakeMediaClient({"id": "visual-empty"}),
+        transcriber=FakeTranscriber(),
+        audio_extractor=FakeAudioExtractor(),
+        visual_extractor=FakeVisualExtractor(pages=[]),
+    ).extract(
+        "https://example.test/video",
+        ExtractConfig(output_root=tmp_path, extract_visual=True),
+    )
+
+    assert result.pages_json_path is not None
+    assert result.pages_json_path.exists()
+    assert result.meta["files"]["pages_json"] == "pages.json"
+
+
+def test_visual_extraction_error_fails_task(tmp_path: Path) -> None:
+    extractor = Extractor(
+        media_client=FakeMediaClient({"id": "visual-error"}),
+        transcriber=FakeTranscriber(),
+        audio_extractor=FakeAudioExtractor(),
+        visual_extractor=FakeVisualExtractor(error=ExtractionError("ocr failed")),
+    )
+
+    with pytest.raises(ExtractionError, match="ocr failed"):
+        extractor.extract(
+            "https://example.test/video",
+            ExtractConfig(output_root=tmp_path, extract_visual=True),
+        )
 
 
 def test_existing_output_directory_requires_overwrite(tmp_path: Path) -> None:

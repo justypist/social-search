@@ -40,6 +40,7 @@ class TaskRecord:
     id: str
     url: str
     language: Language
+    extract_visual: bool
     status: TaskStatus
     progress: int
     stage: str
@@ -95,7 +96,13 @@ class TaskManager:
             worker.cancel()
         await asyncio.gather(*self._workers, return_exceptions=True)
 
-    async def create_task(self, url: str, *, language: Language | None = None) -> dict[str, Any]:
+    async def create_task(
+        self,
+        url: str,
+        *,
+        language: Language | None = None,
+        extract_visual: bool = False,
+    ) -> dict[str, Any]:
         parsed = urlparse(url.strip())
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise HTTPException(status_code=422, detail="请输入有效的视频链接")
@@ -109,6 +116,7 @@ class TaskManager:
                 id=task_id,
                 url=url.strip(),
                 language=task_language,
+                extract_visual=extract_visual,
                 status="queued",
                 progress=0,
                 stage="queued",
@@ -116,7 +124,8 @@ class TaskManager:
                 updated_at=now,
                 sequence=self._sequence,
             )
-            self._append_log(record, "info", f"任务已加入队列 | 语言：{_language_label(record.language)}")
+            visual_label = " | 画面文字：开启" if record.extract_visual else ""
+            self._append_log(record, "info", f"任务已加入队列 | 语言：{_language_label(record.language)}{visual_label}")
             self._tasks[task_id] = record
             self._persist_tasks_locked()
         await self._queue.put(task_id)
@@ -412,6 +421,7 @@ class TaskManager:
             "url": record.url,
             "output_root": str(self._settings.output_dir),
             "language": record.language,
+            "extract_visual": record.extract_visual,
             "model": self._settings.model,
             "device": self._settings.device,
             "compute_type": self._settings.compute_type,
@@ -437,6 +447,8 @@ class TaskManager:
             if not path.is_file():
                 continue
             rel = path.relative_to(output_dir).as_posix()
+            if _hide_from_file_list(rel):
+                continue
             stat = path.stat()
             files.append(
                 {
@@ -453,6 +465,7 @@ class TaskManager:
             "id": record.id,
             "url": record.url,
             "language": record.language,
+            "extract_visual": record.extract_visual,
             "status": record.status,
             "progress": record.progress,
             "stage": record.stage,
@@ -530,6 +543,7 @@ class TaskManager:
             id=task_id,
             url=url,
             language=_coerce_language(payload.get("language"), self._settings.language),
+            extract_visual=_coerce_bool(payload.get("extract_visual"), False),
             status=status,  # type: ignore[arg-type]
             progress=max(0, min(100, _coerce_int(payload.get("progress"), 0))),
             stage=_clean_string(payload.get("stage")) or status,
@@ -577,6 +591,7 @@ class TaskManager:
                 id=task_id,
                 url=url,
                 language=_coerce_language(meta.get("requested_language"), self._settings.language),
+                extract_visual=_coerce_bool(meta.get("extract_visual"), False),
                 status="succeeded",
                 progress=100,
                 stage="done",
@@ -623,6 +638,7 @@ class TaskManager:
                 id=task_id,
                 url=url,
                 language=_coerce_language(job.get("language"), self._settings.language),
+                extract_visual=_coerce_bool(job.get("extract_visual"), False),
                 status="stopped",
                 progress=0,
                 stage="stopped",
@@ -655,6 +671,7 @@ class TaskManager:
             "id": record.id,
             "url": record.url,
             "language": record.language,
+            "extract_visual": record.extract_visual,
             "status": record.status,
             "progress": record.progress,
             "stage": record.stage,
@@ -752,7 +769,10 @@ class TaskManager:
 
         percent = progress["percent"]
         if record.stage == "download_video":
-            stage_start, stage_end = 48, 58
+            if record.extract_visual:
+                stage_start, stage_end = 38, 54
+            else:
+                stage_start, stage_end = 48, 58
         else:
             stage_start, stage_end = 38, 64
             record.stage = "download_audio"
@@ -813,6 +833,23 @@ def _coerce_int(value: Any, fallback: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return fallback
+
+
+def _coerce_bool(value: Any, fallback: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return fallback
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return fallback
+
+
+def _hide_from_file_list(relative_path: str) -> bool:
+    return relative_path == "frames.json" or relative_path.startswith("frames/")
 
 
 def _coerce_language(value: Any, fallback: Language) -> Language:

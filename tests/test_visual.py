@@ -229,7 +229,7 @@ def test_visual_extractor_describes_deduplicated_page_frames(tmp_path: Path) -> 
                     "visual_keywords": ["系统架构", "服务"],
                     "visual_content_type": "architecture_diagram",
                     "visual_confidence": 0.88,
-                    "visual_provider": "gemini",
+                    "visual_provider": "openai",
                     "visual_model": "default",
                     "visual_cache_hit": False,
                 }
@@ -238,7 +238,7 @@ def test_visual_extractor_describes_deduplicated_page_frames(tmp_path: Path) -> 
                 pages=described,
                 meta={
                     "enabled": True,
-                    "provider": "gemini",
+                    "provider": "openai",
                     "model": "default",
                     "candidate_pages": 1,
                     "described_pages": 1,

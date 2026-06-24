@@ -11,7 +11,7 @@ from .models import ExtractConfig
 from .ocr import OcrRecognizer, RapidOcrRecognizer
 from .paths import relative_or_name
 from .progress import ProgressCallback
-from .visual_description import GeminiVisualDescriber, VisualDescriber
+from .visual_description import OpenaiVisualDescriber, VisualDescriber
 from .vision import (
     HasTextDetector,
     OpenCvHasTextDetector,
@@ -95,12 +95,11 @@ class VisualExtractor:
         payload_pages = self._materialize_page_frames(pages, frame_result.frames_dir, output_dir)
         visual_description_meta = None
         if config.describe_visual:
-            provider = (config.visual_description_provider or "gemini").strip().lower()
-            if provider != "gemini":
+            provider = (config.visual_description_provider or "openai").strip().lower()
+            if provider != "openai":
                 raise ExtractionError(f'Unsupported visual description provider "{provider}"')
             _emit(progress_callback, "visual_describe", "总结关键帧 0.0%", 0.89)
-            describer = self._visual_describer or GeminiVisualDescriber(
-                cookie_files=config.configured_cookie_files or None,
+            describer = self._visual_describer or OpenaiVisualDescriber(
                 model=config.visual_description_model,
             )
             try:

@@ -62,7 +62,7 @@ class ExtractConfig:
     text_dedup_containment_threshold: float = 0.85
     visual_description_optional: bool = True
     max_visual_describe_pages: int = 120
-    visual_description_provider: str | None = None
+    visual_description_provider: str | None = "openai"
     visual_description_model: str | None = None
 
     @property

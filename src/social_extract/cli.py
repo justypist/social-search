@@ -50,7 +50,7 @@ def main(
     ] = False,
     describe_visual: Annotated[
         bool,
-        typer.Option("--describe-visual/--no-describe-visual", help="Summarize representative keyframes with Gemini."),
+        typer.Option("--describe-visual/--no-describe-visual", help="Summarize representative keyframes with OpenAI."),
     ] = False,
     keep_media: Annotated[
         bool,

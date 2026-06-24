@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+import base64
 import hashlib
 import json
 from dataclasses import dataclass
@@ -8,12 +8,12 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .errors import ExtractionError
-from .gemini_client import GeminiConfigurationError, create_gemini_client
 from .models import ExtractConfig
+from .openai_client import create_openai_client
 from .progress import ProgressCallback
 
 
-VISUAL_DESCRIPTION_PROMPT_VERSION = "visual-description-v1"
+VISUAL_DESCRIPTION_PROMPT_VERSION = "visual-description-v2"
 VISUAL_DESCRIPTION_PROMPT_TEMPLATE = """You describe visual content in one representative video frame.
 Focus on non-OCR visual information: charts, diagrams, screenshots, photos, flows, architecture relations, and important visual structure.
 Do not repeat ordinary OCR text unless it is needed to explain the image, chart, or diagram.
@@ -66,27 +66,25 @@ class VisualDescriber(Protocol):
         ...
 
 
-class GeminiVisualDescriber:
-    provider = "gemini"
+class OpenaiVisualDescriber:
+    provider = "openai"
 
     def __init__(
         self,
         *,
-        cookie_files: tuple[Path, ...] | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
         client: Any | None = None,
         model: str | None = None,
         prompt_template: str = VISUAL_DESCRIPTION_PROMPT_TEMPLATE,
         generate_kwargs: dict[str, Any] | None = None,
-        init_kwargs: dict[str, Any] | None = None,
     ) -> None:
-        self._cookie_files = cookie_files
+        self._api_key = api_key
+        self._base_url = base_url
         self._client = client
         self._model = model
         self._prompt_template = prompt_template
-        self._generate_kwargs = {"temporary": True, **(generate_kwargs or {})}
-        self._init_kwargs = {"auto_refresh": False, **(init_kwargs or {})}
-        self._initialized = False
-        self._runner: asyncio.Runner | None = None
+        self._generate_kwargs = dict(generate_kwargs or {})
 
     def describe_pages(
         self,
@@ -98,8 +96,8 @@ class GeminiVisualDescriber:
     ) -> VisualDescriptionResult:
         described_pages = [dict(page) for page in pages]
         limit = max(0, config.max_visual_describe_pages)
-        model = self._model or config.visual_description_model
-        model_label = model or "default"
+        model = self._model or config.visual_description_model or "gpt-5.4-mini"
+        model_label = model
         cache_path = output_dir / "visual_description_cache.json"
         cache = _load_cache(cache_path)
         meta = {
@@ -138,7 +136,7 @@ class GeminiVisualDescriber:
                     meta["cache_hits"] += 1
                 else:
                     prompt = self._prompt(page)
-                    description = self._run(self._describe_async(frame_path, prompt, model))
+                    description = self._describe(frame_path, prompt, model)
                     cache[cache_key] = description
                     page.update(description)
                     page["visual_cache_hit"] = False
@@ -158,14 +156,7 @@ class GeminiVisualDescriber:
         return VisualDescriptionResult(pages=described_pages, meta=meta)
 
     def close(self) -> None:
-        if self._runner is None:
-            return
-        try:
-            self._runner.run(self._close_async())
-        finally:
-            self._runner.close()
-            self._runner = None
-            self._initialized = False
+        self._client = None
 
     def _prompt(self, page: dict[str, Any]) -> str:
         return self._prompt_template.format(
@@ -174,48 +165,48 @@ class GeminiVisualDescriber:
             ocr_text=str(page.get("text") or "").strip() or "(empty)",
         )
 
-    def _run(self, coroutine: Any) -> Any:
-        if self._runner is None:
-            self._runner = asyncio.Runner()
-        return self._runner.run(coroutine)
+    def _describe(self, frame_path: Path, prompt: str, model: str) -> dict[str, Any]:
+        client = self._get_client()
+        image_data = frame_path.read_bytes()
+        image_base64 = base64.b64encode(image_data).decode("utf-8")
+        suffix = frame_path.suffix.lower()
+        if suffix in (".jpg", ".jpeg"):
+            mime_type = "image/jpeg"
+        elif suffix == ".png":
+            mime_type = "image/png"
+        elif suffix == ".webp":
+            mime_type = "image/webp"
+        elif suffix == ".gif":
+            mime_type = "image/gif"
+        else:
+            mime_type = "image/jpeg"
 
-    async def _describe_async(self, frame_path: Path, prompt: str, model: str | None) -> dict[str, Any]:
-        client = await self._get_client()
-        kwargs = dict(self._generate_kwargs)
-        if model:
-            kwargs["model"] = model
-        output = client.generate_content(prompt, files=[frame_path], **kwargs)
-        if hasattr(output, "__await__"):
-            output = await output
-        output_text = getattr(output, "text", None)
-        return _coerce_description(str(output_text) if output_text is not None else str(output))
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime_type};base64,{image_base64}"},
+                        },
+                    ],
+                }
+            ],
+            **self._generate_kwargs,
+        )
+        output_text = response.choices[0].message.content
+        return _coerce_description(str(output_text) if output_text is not None else "")
 
-    async def _get_client(self) -> Any:
+    def _get_client(self) -> Any:
         if self._client is None:
-            try:
-                self._client = create_gemini_client(cookie_files=self._cookie_files)
-            except GeminiConfigurationError as exc:
-                raise ExtractionError(f"Gemini credentials are required for keyframe summaries: {exc}") from exc
-
-        if self._initialized:
-            return self._client
-
-        init = getattr(self._client, "init", None)
-        if callable(init):
-            initialized = init(**self._init_kwargs)
-            if hasattr(initialized, "__await__"):
-                await initialized
-        self._initialized = True
+            self._client = create_openai_client(
+                api_key=self._api_key,
+                base_url=self._base_url,
+            )
         return self._client
-
-    async def _close_async(self) -> None:
-        if self._client is None:
-            return
-        close = getattr(self._client, "close", None)
-        if callable(close):
-            closed = close()
-            if hasattr(closed, "__await__"):
-                await closed
 
 
 def _coerce_description(raw: Any) -> dict[str, Any]:
